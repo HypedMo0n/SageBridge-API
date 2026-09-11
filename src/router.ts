@@ -12,6 +12,7 @@ import { handleHealth } from './handlers/health';
 import { handleGetCustomers, handleGetCustomer, handleCreateCustomer } from './handlers/customers';
 import { handleGetInvoices, handleGetInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
+import { handleCreateQuote } from './handlers/quotes';
 import { handleSyncCustomers, handleSyncInvoices, handleSyncProducts } from './handlers/sync';
 import { handleGetJob } from './handlers/jobs';
 import { 
@@ -64,6 +65,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === '/api/products' && method === 'GET') {
     return handleGetProducts(tenantId!, companyId!, env);
+  }
+
+  if (path === '/api/quotes' && method === 'POST') {
+    return handleCreateQuote(tenantId!, companyId!, request, env);
   }
 
   // Connector sync routes
