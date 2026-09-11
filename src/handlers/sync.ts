@@ -10,12 +10,13 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
     const body = await request.json() as any;
     const { TenantId, CompanyId, Customers } = body;
 
-    if (!TenantId || !CompanyId || !Customers) {
+    if (!TenantId || !CompanyId || !Array.isArray(Customers)) {
       return jsonResponse({ error: 'Missing required fields' }, 400);
     }
 
     let synced = 0;
     let errors = 0;
+    const snapshotToken = new Date().toISOString();
 
     // Upsert each customer
     for (const customer of Customers) {
@@ -23,14 +24,14 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
         await env.DB.prepare(`
           INSERT INTO customers (
             tenant_id, company_id, sage_id, name, email, phone, balance, status, last_synced_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(tenant_id, company_id, sage_id) DO UPDATE SET
             name = excluded.name,
             email = excluded.email,
             phone = excluded.phone,
             balance = excluded.balance,
             status = excluded.status,
-            last_synced_at = CURRENT_TIMESTAMP
+            last_synced_at = excluded.last_synced_at
         `).bind(
           TenantId,
           CompanyId,
@@ -39,7 +40,8 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
           customer.Email || null,
           customer.Phone || null,
           customer.Balance || 0,
-          customer.Status || 'Active'
+          customer.Status || 'Active',
+          snapshotToken
         ).run();
         
         synced++;
@@ -47,6 +49,17 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
         console.error('Failed to sync customer:', customer.Id, error);
         errors++;
       }
+    }
+
+    // The connector sends a complete Sage customer snapshot. Remove cloud
+    // records absent from that snapshot only when every upsert succeeded.
+    let deleted = 0;
+    if (errors === 0) {
+      const deletionResult = await env.DB.prepare(`
+        DELETE FROM customers
+        WHERE tenant_id = ? AND company_id = ? AND last_synced_at <> ?
+      `).bind(TenantId, CompanyId, snapshotToken).run();
+      deleted = deletionResult.meta.changes || 0;
     }
 
     // Log sync event
@@ -64,6 +77,7 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
     return jsonResponse({
       success: true,
       synced,
+      deleted,
       errors,
       total: Customers.length
     });
