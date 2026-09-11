@@ -4,6 +4,7 @@
 
 import { Env } from '../index';
 import { jsonResponse } from '../utils/response';
+import { isIdempotencyConflict, payloadFingerprint } from '../utils/idempotency';
 
 // Get pending jobs for a connector
 export async function handleGetConnectorJobs(
@@ -45,10 +46,12 @@ export async function handleStartJob(
   env: Env
 ): Promise<Response> {
   try {
-    await env.DB.prepare(`
+    const claim = await env.DB.prepare(`
       UPDATE connector_jobs
       SET status = 'processing',
-          started_at = datetime('now'),
+          started_at = COALESCE(started_at, datetime('now')),
+          claimed_at = datetime('now'),
+          claim_expires_at = datetime('now', '+2 minutes'),
           attempts = attempts + 1
       WHERE id = ?
         AND tenant_id = ?
@@ -56,7 +59,19 @@ export async function handleStartJob(
         AND status = 'pending'
     `).bind(jobId, tenantId, companyId).run();
 
-    return jsonResponse({ success: true });
+    if ((claim.meta.changes || 0) !== 1) {
+      const existing = await env.DB.prepare(`
+        SELECT status FROM connector_jobs
+        WHERE id = ? AND tenant_id = ? AND company_id = ?
+      `).bind(jobId, tenantId, companyId).first();
+
+      return jsonResponse({
+        error: existing ? 'Job is not available to claim' : 'Job not found',
+        status: existing?.status || null
+      }, existing ? 409 : 404);
+    }
+
+    return jsonResponse({ success: true, status: 'processing' });
   } catch (error: any) {
     return jsonResponse({ error: error.message }, 500);
   }
@@ -78,10 +93,32 @@ export async function handleJobResult(
       return jsonResponse({ error: 'Invalid status (must be succeeded or failed)' }, 400);
     }
 
-    // Get job action to determine resource type
+    // Read the scoped job before accepting a terminal result.
     const job = await env.DB.prepare(`
-      SELECT action FROM connector_jobs WHERE id = ?
-    `).bind(jobId).first();
+      SELECT action, status, result, error
+      FROM connector_jobs
+      WHERE id = ? AND tenant_id = ? AND company_id = ?
+    `).bind(jobId, tenantId, companyId).first<{
+      action: string;
+      status: string;
+      result: string | null;
+      error: string | null;
+    }>();
+
+    if (!job) {
+      return jsonResponse({ error: 'Job not found' }, 404);
+    }
+
+    if (job.status === 'succeeded' || job.status === 'failed') {
+      if (job.status === status) {
+        return jsonResponse({ success: true, existing: true });
+      }
+      return jsonResponse({ error: 'Job already has a different terminal status' }, 409);
+    }
+
+    if (job.status !== 'processing') {
+      return jsonResponse({ error: 'Job must be claimed before submitting a result' }, 409);
+    }
 
     let result = null;
     if (status === 'succeeded' && sageId) {
@@ -96,15 +133,17 @@ export async function handleJobResult(
       });
     }
 
-    await env.DB.prepare(`
+    const completion = await env.DB.prepare(`
       UPDATE connector_jobs
       SET status = ?,
           result = ?,
           error = ?,
-          completed_at = datetime('now')
+          completed_at = datetime('now'),
+          claim_expires_at = NULL
       WHERE id = ?
         AND tenant_id = ?
         AND company_id = ?
+        AND status = 'processing'
     `).bind(
       status,
       result,
@@ -114,53 +153,88 @@ export async function handleJobResult(
       companyId
     ).run();
 
-    return jsonResponse({ success: true });
+    if ((completion.meta.changes || 0) !== 1) {
+      return jsonResponse({ error: 'Job result was not accepted' }, 409);
+    }
+
+    return jsonResponse({ success: true, existing: false });
   } catch (error: any) {
     return jsonResponse({ error: error.message }, 500);
   }
 }
 
-// Create a new job (with idempotency check)
+// Create a new job with payload-bound idempotency.
 export async function createJob(
   tenantId: string,
   companyId: string,
   requestId: string,
   action: string,
-  payload: any,
+  payload: unknown,
   env: Env
-): Promise<{ jobId: string; existing: boolean }> {
-  // Check if already processed
+): Promise<{ jobId: string; existing: boolean; conflict: boolean }> {
+  const fingerprint = await payloadFingerprint(action, payload);
   const existing = await env.DB.prepare(`
-    SELECT id, status, result, error
+    SELECT id, action, payload, payload_hash
     FROM connector_jobs
-    WHERE request_id = ?
-      AND tenant_id = ?
-      AND company_id = ?
+    WHERE request_id = ? AND tenant_id = ? AND company_id = ?
   `).bind(requestId, tenantId, companyId).first();
 
   if (existing) {
+    const existingFingerprint = existing.payload_hash
+      ? String(existing.payload_hash)
+      : await payloadFingerprint(String(existing.action), JSON.parse(String(existing.payload)));
+
     return {
-      jobId: existing.id as string,
-      existing: true
+      jobId: String(existing.id),
+      existing: true,
+      conflict: isIdempotencyConflict(
+        String(existing.action),
+        existingFingerprint,
+        action,
+        fingerprint
+      )
     };
   }
 
-  // Create new job
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  await env.DB.prepare(`
-    INSERT INTO connector_jobs (id, tenant_id, company_id, request_id, action, payload)
-    VALUES (?, ?, ?, ?, ?, ?)
+  const jobId = `job_${Date.now()}_${crypto.randomUUID()}`;
+  const insert = await env.DB.prepare(`
+    INSERT OR IGNORE INTO connector_jobs
+      (id, tenant_id, company_id, request_id, action, payload, payload_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(
     jobId,
     tenantId,
     companyId,
     requestId,
     action,
-    JSON.stringify(payload)
+    JSON.stringify(payload),
+    fingerprint
   ).run();
 
-  return { jobId, existing: false };
+  if ((insert.meta.changes || 0) === 1) {
+    return { jobId, existing: false, conflict: false };
+  }
+
+  // A concurrent request inserted the same key after our initial read.
+  const raced = await env.DB.prepare(`
+    SELECT id, action, payload, payload_hash
+    FROM connector_jobs
+    WHERE request_id = ? AND tenant_id = ? AND company_id = ?
+  `).bind(requestId, tenantId, companyId).first();
+
+  if (!raced) {
+    throw new Error('Idempotency key is unavailable in this company scope');
+  }
+
+  const racedFingerprint = raced.payload_hash
+    ? String(raced.payload_hash)
+    : await payloadFingerprint(String(raced.action), JSON.parse(String(raced.payload)));
+
+  return {
+    jobId: String(raced.id),
+    existing: true,
+    conflict: isIdempotencyConflict(String(raced.action), racedFingerprint, action, fingerprint)
+  };
 }
 
 // Get job status

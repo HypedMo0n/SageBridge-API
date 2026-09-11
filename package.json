@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute sagebridge-db --file=./schema.sql",
     "db:create": "wrangler d1 create sagebridge-db",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node --no-warnings --experimental-strip-types --test test/*.test.ts"
   },
   "keywords": ["cloudflare", "workers", "sage50", "api"],
   "author": "SageBridge",

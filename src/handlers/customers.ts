@@ -75,7 +75,7 @@ export async function handleCreateCustomer(
     }
 
     // Create job in queue
-    const { jobId, existing } = await createJob(
+    const { jobId, existing, conflict } = await createJob(
       tenantId,
       companyId,
       idempotencyKey,
@@ -83,6 +83,13 @@ export async function handleCreateCustomer(
       customer, // Clean customer object only
       env
     );
+
+    if (conflict) {
+      return jsonResponse({
+        error: 'Idempotency key was already used with a different request',
+        code: 'IDEMPOTENCY_CONFLICT'
+      }, 409);
+    }
 
     if (existing) {
       // Return existing job status
