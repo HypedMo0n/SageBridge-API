@@ -13,6 +13,7 @@ import { handleGetCustomers, handleGetCustomer, handleCreateCustomer } from './h
 import { handleGetInvoices, handleGetInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
 import { handleSyncCustomers, handleSyncInvoices, handleSyncProducts } from './handlers/sync';
+import { handleGetJob } from './handlers/jobs';
 import { 
   handleGetConnectorJobs, 
   handleStartJob,
@@ -78,24 +79,25 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return handleSyncProducts(request, env);
   }
 
-  // Connector job queue routes
+  // Frontend-facing job status API
+  if (path.match(/^\/api\/jobs\/[\w-]+$/) && method === 'GET') {
+    const jobId = path.split('/')[3];
+    return handleGetJob(jobId, tenantId!, companyId!, env);
+  }
+
+  // Connector-facing job queue routes (backend only)
   if (path === '/connector/jobs' && method === 'GET') {
     return handleGetConnectorJobs(tenantId!, companyId!, env);
   }
 
-  if (path.match(/^\/connector\/jobs\/[\\w-]+\/start$/) && method === 'POST') {
+  if (path.match(/^\/connector\/jobs\/[\w-]+\/start$/) && method === 'POST') {
     const jobId = path.split('/')[3];
     return handleStartJob(jobId, tenantId!, companyId!, env);
   }
 
-  if (path.match(/^\/connector\/jobs\/[\\w-]+\/result$/) && method === 'POST') {
+  if (path.match(/^\/connector\/jobs\/[\w-]+\/result$/) && method === 'POST') {
     const jobId = path.split('/')[3];
     return handleJobResult(jobId, tenantId!, companyId!, request, env);
-  }
-
-  if (path.match(/^\/connector\/jobs\/[\\w-]+$/) && method === 'GET') {
-    const jobId = path.split('/')[3];
-    return handleGetJobStatus(jobId, tenantId!, companyId!, env);
   }
 
   // 404 Not Found

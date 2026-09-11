@@ -72,10 +72,28 @@ export async function handleJobResult(
 ): Promise<Response> {
   try {
     const body = await request.json() as any;
-    const { status, result, error } = body;
+    const { status, sageId, error } = body;
 
-    if (!status || !['completed', 'failed'].includes(status)) {
-      return jsonResponse({ error: 'Invalid status' }, 400);
+    if (!status || !['succeeded', 'failed'].includes(status)) {
+      return jsonResponse({ error: 'Invalid status (must be succeeded or failed)' }, 400);
+    }
+
+    // Get job action to determine resource type
+    const job = await env.DB.prepare(`
+      SELECT action FROM connector_jobs WHERE id = ?
+    `).bind(jobId).first();
+
+    let result = null;
+    if (status === 'succeeded' && sageId) {
+      // Extract resource type from action
+      const resourceType = job?.action?.split('.')[0]; // 'customer.create' → 'customer'
+      
+      result = JSON.stringify({
+        resource: {
+          type: resourceType,
+          id: sageId
+        }
+      });
     }
 
     await env.DB.prepare(`
@@ -89,7 +107,7 @@ export async function handleJobResult(
         AND company_id = ?
     `).bind(
       status,
-      result ? JSON.stringify(result) : null,
+      result,
       error || null,
       jobId,
       tenantId,

@@ -63,34 +63,48 @@ export async function handleCreateCustomer(
 ): Promise<Response> {
   try {
     const body = await request.json() as any;
-    const { name, email, phone, requestId } = body;
+    const { customer, idempotencyKey } = body;
 
-    if (!name) {
-      return jsonResponse({ error: 'Customer name is required' }, 400);
+    // Validate payload
+    if (!customer || !customer.name) {
+      return jsonResponse({ error: 'customer.name is required' }, 400);
     }
 
-    if (!requestId) {
-      return jsonResponse({ error: 'requestId is required for idempotency' }, 400);
+    if (!idempotencyKey) {
+      return jsonResponse({ error: 'idempotencyKey is required' }, 400);
     }
 
     // Create job in queue
     const { jobId, existing } = await createJob(
       tenantId,
       companyId,
-      requestId,
+      idempotencyKey,
       'customer.create',
-      { name, email, phone },
+      customer, // Clean customer object only
       env
     );
 
+    if (existing) {
+      // Return existing job status
+      const job = await env.DB.prepare(`
+        SELECT id, status
+        FROM connector_jobs
+        WHERE id = ?
+      `).bind(jobId).first();
+
+      return jsonResponse({
+        jobId,
+        status: job?.status || 'pending',
+        message: 'Request already submitted'
+      });
+    }
+
+    // New job created
     return jsonResponse({
       jobId,
-      requestId,
-      existing,
-      message: existing 
-        ? 'Request already submitted' 
-        : 'Job created, connector will process shortly'
-    }, existing ? 200 : 201);
+      status: 'pending',
+      message: 'Customer creation job queued'
+    }, 201);
   } catch (error: any) {
     return jsonResponse({ error: error.message }, 500);
   }
