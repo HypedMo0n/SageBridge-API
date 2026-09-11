@@ -13,16 +13,20 @@ export async function handleGetCustomers(
 ): Promise<Response> {
   try {
     const { results } = await env.DB.prepare(`
-      SELECT * FROM customers
+      SELECT 
+        id, sage_id as sageId, name, email, phone, balance, status,
+        address, city, province, postal_code as postalCode,
+        last_synced_at as lastSyncedAt
+      FROM customers
       WHERE tenant_id = ? AND company_id = ?
       ORDER BY name ASC
     `).bind(tenantId, companyId).all();
 
     return jsonResponse({
-      tenantId,
-      companyId,
       customers: results,
-      count: results.length
+      count: results.length,
+      tenantId,
+      companyId
     });
   } catch (error: any) {
     return jsonResponse({ error: error.message }, 500);
