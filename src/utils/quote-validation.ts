@@ -13,6 +13,9 @@ export function validateQuotePayload(quote: QuoteInput): string | null {
   if (!quote || typeof quote.customerId !== 'string' || !quote.customerId.trim()) {
     return 'quote.customerId is required';
   }
+  if (quote.customerId.length > 128) {
+    return 'quote.customerId must not exceed 128 characters';
+  }
   if (!Array.isArray(quote.lines) || quote.lines.length === 0) {
     return 'quote.lines must contain at least one item';
   }
@@ -23,6 +26,9 @@ export function validateQuotePayload(quote: QuoteInput): string | null {
     const line = quote.lines[index] as QuoteLineInput;
     if (!line || typeof line.sku !== 'string' || !line.sku.trim()) {
       return `quote.lines[${index}].sku is required`;
+    }
+    if (line.sku.length > 128) {
+      return `quote.lines[${index}].sku must not exceed 128 characters`;
     }
     if (typeof line.quantity !== 'number' || !Number.isFinite(line.quantity) || line.quantity <= 0) {
       return `quote.lines[${index}].quantity must be greater than 0`;

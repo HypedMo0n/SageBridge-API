@@ -9,14 +9,21 @@
     "db:migrate": "wrangler d1 execute sagebridge-db --file=./schema.sql",
     "db:create": "wrangler d1 create sagebridge-db",
     "tail": "wrangler tail",
-    "test": "node --no-warnings --experimental-strip-types --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts"
   },
-  "keywords": ["cloudflare", "workers", "sage50", "api"],
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "sage50",
+    "api"
+  ],
   "author": "SageBridge",
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240529.0",
-    "wrangler": "^3.57.0",
-    "typescript": "^5.4.5"
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.57.0"
   }
 }

@@ -5,6 +5,7 @@
 import { Env } from '../index';
 import { jsonResponse } from '../utils/response';
 import { createJob } from './connector';
+import { parseBoundedJson, isRecord, requiredString } from '../security/security';
 
 export async function handleGetCustomers(
   tenantId: string,
@@ -62,23 +63,29 @@ export async function handleCreateCustomer(
   env: Env
 ): Promise<Response> {
   try {
-    const body = await request.json() as any;
+    const body = await parseBoundedJson(request, 32 * 1024) as any;
+    if (!isRecord(body)) return jsonResponse({ error: 'JSON object required' }, 400);
     const { customer, idempotencyKey } = body;
 
-    // Validate payload
-    if (!customer || !customer.name) {
-      return jsonResponse({ error: 'customer.name is required' }, 400);
-    }
-
-    if (!idempotencyKey) {
-      return jsonResponse({ error: 'idempotencyKey is required' }, 400);
+    if (!isRecord(customer)) return jsonResponse({ error: 'customer is required' }, 400);
+    let normalizedIdempotencyKey: string;
+    try {
+      customer.name = requiredString(customer.name, 'customer.name', 160);
+      normalizedIdempotencyKey = requiredString(idempotencyKey, 'idempotencyKey', 128);
+      for (const field of ['email', 'phone', 'address', 'city', 'province', 'postalCode']) {
+        if (customer[field] != null && (typeof customer[field] !== 'string' || customer[field].length > 320)) {
+          return jsonResponse({ error: `customer.${field} is invalid` }, 400);
+        }
+      }
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Invalid payload' }, 400);
     }
 
     // Create job in queue
     const { jobId, existing, conflict } = await createJob(
       tenantId,
       companyId,
-      idempotencyKey,
+      normalizedIdempotencyKey,
       'customer.create',
       customer, // Clean customer object only
       env
@@ -96,8 +103,8 @@ export async function handleCreateCustomer(
       const job = await env.DB.prepare(`
         SELECT id, status
         FROM connector_jobs
-        WHERE id = ?
-      `).bind(jobId).first();
+        WHERE id = ? AND tenant_id = ? AND company_id = ?
+      `).bind(jobId, tenantId, companyId).first();
 
       return jsonResponse({
         jobId,

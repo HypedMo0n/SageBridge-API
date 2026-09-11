@@ -6,6 +6,7 @@ import { Env } from '../index';
 import { jsonResponse } from '../utils/response';
 import { createJob } from './connector';
 import { QuoteInput, QuoteLineInput, validateQuotePayload } from '../utils/quote-validation';
+import { parseBoundedJson } from '../security/security';
 
 export async function handleCreateQuote(
   tenantId: string,
@@ -14,7 +15,7 @@ export async function handleCreateQuote(
   env: Env
 ): Promise<Response> {
   try {
-    const body = await request.json() as { quote?: QuoteInput; idempotencyKey?: unknown };
+    const body = await parseBoundedJson(request, 32 * 1024) as { quote?: QuoteInput; idempotencyKey?: unknown };
     if (typeof body.idempotencyKey !== 'string' || !body.idempotencyKey.trim()) {
       return jsonResponse({ error: 'idempotencyKey is required' }, 400);
     }

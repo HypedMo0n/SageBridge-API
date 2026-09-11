@@ -17,6 +17,8 @@ database_id = "2613ec7a-8047-4185-a608-b8c672cdb74a"
 [vars]
 ENVIRONMENT = "production"
 API_VERSION = "v1"
+FIREBASE_PROJECT_ID = "sagebridge-identity-hypedmoon"
+FRONTEND_ORIGINS = "https://sagebridge-v3.vercel.app"
 
 # Secrets (set with: wrangler secret put MASTER_API_KEY)
 # MASTER_API_KEY = "your-secret-key"

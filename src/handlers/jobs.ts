@@ -47,7 +47,7 @@ export async function handleGetJob(
     // Clean response for frontend
     return jsonResponse({
       jobId: job.id,
-      status: job.status, // pending | processing | succeeded | failed
+      status: job.status, // pending | claimed | running | succeeded | failed
       action: job.action,
       resource, // { type: 'customer', id: 'sage_123' }
       error: job.error,

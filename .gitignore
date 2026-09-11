@@ -5,3 +5,4 @@ wrangler.toml.backup
 *.log
 .env
 .dev.vars
+backups/
