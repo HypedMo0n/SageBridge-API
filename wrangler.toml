@@ -1,0 +1,29 @@
+name = "sagebridge-api"
+main = "src/index.ts"
+compatibility_date = "2024-05-01"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "sagebridge-db"
+database_id = "2613ec7a-8047-4185-a608-b8c672cdb74a"
+
+# KV for sessions/cache (optional)
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "YOUR_KV_ID"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"
+API_VERSION = "v1"
+
+# Secrets (set with: wrangler secret put MASTER_API_KEY)
+# MASTER_API_KEY = "your-secret-key"
+
+# CORS settings
+[env.production]
+name = "sagebridge-api"
+
+[env.development]
+name = "sagebridge-api-dev"
