@@ -69,13 +69,16 @@ export async function requireConnector(request: Request, env: Env): Promise<Conn
   const credential = requiredString(rawCredential,'X-Connector-Credential',500);
   const hash = await hashSecret(credential);
   const row = await env.DB.prepare(`
-    SELECT c.id connector_id,c.organization_id,c.company_id
+    SELECT c.id connector_id,c.organization_id,c.company_id,k.id credential_id
     FROM connector_credentials k JOIN connectors c ON c.id=k.connector_id
     WHERE c.id=? AND k.token_hash=? AND k.revoked_at IS NULL
       AND (k.expires_at IS NULL OR k.expires_at>CURRENT_TIMESTAMP)
       AND c.revoked_at IS NULL AND c.status='active'
   `).bind(connectorId,hash).first<any>();
   if (!row) throw new HttpError(401, 'Invalid connector credential', 'INVALID_CONNECTOR_TOKEN');
-  await env.DB.prepare(`UPDATE connector_credentials SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?`).bind(hash).run();
+  await env.DB.prepare(`
+    UPDATE connector_credentials SET last_used_at=CURRENT_TIMESTAMP
+    WHERE id=? AND (last_used_at IS NULL OR last_used_at<datetime('now','-30 minutes'))
+  `).bind(row.credential_id).run();
   return { kind: 'connector', connectorId: row.connector_id, organizationId: row.organization_id, companyId: row.company_id };
 }
