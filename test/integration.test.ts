@@ -41,6 +41,7 @@ async function database() {
   await db.exec(sql('migrations/0003_external_beta_phase1.sql'));
   await db.exec(sql('migrations/0004_pairing_claim_hardening.sql'));
   await db.exec(sql('migrations/0005_invoice_create.sql'));
+  await db.exec(sql('migrations/0006_stable_installation_identity.sql'));
   return {mf,env:{DB:db,FIREBASE_PROJECT_ID:project,FRONTEND_ORIGINS:'https://app.example.com'} as any};
 }
 
@@ -73,7 +74,7 @@ test('synced quotes are returned to authorized company users',async()=>{
     const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
     const company=boot.body.companies[0].id;
     const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
-    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'QUOTE-READER'}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'QUOTE-READER',installationId:'inst_00000000-0000-4000-8000-000000000001'}),env));
     const syncedQuote={Id:'16',QuoteNumber:'QT-20260912-001',CustomerId:'33',CustomerName:'Rayan Nair',Date:'2026-09-12',Subtotal:2000,TaxAmount:100,TotalAmount:2100,Lines:[{Sku:'S3040',Quantity:1,UnitPrice:1000,LineTotal:1000},{Sku:'S1040',Quantity:1,UnitPrice:1000,LineTotal:1000}]};
     assert.equal((await json(await handleRequest(connectorRequest('/sync/quotes','POST',exchange.body.connectorId,exchange.body.credential,{Quotes:[syncedQuote]}),env))).status,200);
     const listed=await json(await handleRequest(request('/api/quotes','GET',token,undefined,{'x-company-id':company}),env));
@@ -98,8 +99,8 @@ test('routes enforce tenant isolation, pairing lifecycle, connector scope, provi
     const pairing=await json(await handleRequest(request(`/api/companies/${companyA}/pairing-codes`,'POST',tokenA,{}),env));
     assert.equal(pairing.status,201); assert.match(pairing.body.expiresAt,/\d{4}-\d{2}-\d{2}/);
     const attempts=await Promise.all([
-      handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-1234'}),env).then(json),
-      handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'RACING-DESKTOP'}),env).then(json),
+      handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-1234',installationId:'inst_00000000-0000-4000-8000-000000000002'}),env).then(json),
+      handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'RACING-DESKTOP',installationId:'inst_00000000-0000-4000-8000-000000000002'}),env).then(json),
     ]);
     assert.deepEqual(attempts.map(x=>x.status).sort(),[200,409]);
     const exchange=attempts.find(x=>x.status===200)!; const connectorToken=exchange.body.credential, connectorId=exchange.body.connectorId;
@@ -108,11 +109,11 @@ test('routes enforce tenant isolation, pairing lifecycle, connector scope, provi
     const storedConnector=await env.DB.prepare(`SELECT machine_name,connector_version,paired_at FROM connectors WHERE id=?`).bind(connectorId).first<any>();
     assert.ok(['DESKTOP-1234','RACING-DESKTOP'].includes(storedConnector.machine_name)); assert.equal(storedConnector.connector_version,'0.1.0-beta'); assert.ok(storedConnector.paired_at);
     assert.equal((await env.DB.prepare(`SELECT count(*) n FROM connector_credentials WHERE token_hash=?`).bind(connectorToken).first<any>()).n,0);
-    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'OTHER'}),env))).status,409);
-    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:'AAAA-AAAA',connectorVersion:'0.1.0-beta',machineName:'x'}),env))).status,401);
+    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'OTHER',installationId:'inst_00000000-0000-4000-8000-000000000002'}),env))).status,409);
+    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:'AAAA-AAAA',connectorVersion:'0.1.0-beta',machineName:'x',installationId:'inst_00000000-0000-4000-8000-000000000003'}),env))).status,401);
     const expiredPair=await json(await handleRequest(request(`/api/companies/${companyA}/pairing-codes`,'POST',tokenA,{}),env));
     await env.DB.prepare(`UPDATE pairing_codes SET expires_at=datetime('now','-1 minute') WHERE code_hash IS NOT NULL AND status='active'`).run();
-    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:expiredPair.body.code,connectorVersion:'0.1.0-beta',machineName:'expired'}),env))).status,410);
+    assert.equal((await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:expiredPair.body.code,connectorVersion:'0.1.0-beta',machineName:'expired',installationId:'inst_00000000-0000-4000-8000-000000000004'}),env))).status,410);
 
     const connectors=await json(await handleRequest(request(`/api/companies/${companyA}/connectors`,'GET',tokenA),env));
     assert.equal(connectors.body.connectors.length,1); assert.equal(connectors.body.connectors[0].id,connectorId);
@@ -144,13 +145,13 @@ test('routes enforce tenant isolation, pairing lifecycle, connector scope, provi
 
     const replacementPair=await json(await handleRequest(request(`/api/companies/${companyA}/pairing-codes`,'POST',tokenA,{}),env));
     await env.DB.prepare(`UPDATE provisioning SET state='ready',progress=100 WHERE company_id=?`).bind(companyA).run();
-    const replacement=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:replacementPair.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-A2'}),env));
+    const replacement=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:replacementPair.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-A2',installationId:'inst_00000000-0000-4000-8000-000000000005'}),env));
     assert.deepEqual(await env.DB.prepare(`SELECT state,progress FROM provisioning WHERE company_id=?`).bind(companyA).first<any>(),{state:'ready',progress:100});
     assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/start`,'POST',replacement.body.connectorId,replacement.body.credential),env))).status,200);
     assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',connectorId,connectorToken,{status:'succeeded',sageId:'stale'}),env))).status,403);
 
     const pairingB=await json(await handleRequest(request(`/api/companies/${companyB}/pairing-codes`,'POST',tokenB,{}),env));
-    const exchangeB=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairingB.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-B'}),env));
+    const exchangeB=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairingB.body.code,connectorVersion:'0.1.0-beta',machineName:'DESKTOP-B',installationId:'inst_00000000-0000-4000-8000-000000000006'}),env));
     assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',exchangeB.body.connectorId,exchangeB.body.credential,{status:'succeeded',sageId:'bad'}),env))).status,404);
     assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',replacement.body.connectorId,replacement.body.credential,{status:'succeeded'}),env))).status,400);
     assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',replacement.body.connectorId,replacement.body.credential,{status:'failed'}),env))).status,400);
@@ -190,7 +191,7 @@ test('invoice.create is queued, claimed, and resolved idempotently like quote.cr
     const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
     const company=boot.body.companies[0].id;
     const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
-    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'INVOICE-DESKTOP'}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'INVOICE-DESKTOP',installationId:'inst_00000000-0000-4000-8000-000000000007'}),env));
     const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
 
     const rejectedByCheck=await env.DB.prepare(`INSERT INTO connector_jobs(id,tenant_id,company_id,request_id,action,payload) VALUES ('bad-action','x','y','z','not.a.real.action','{}')`).run().catch((e:Error)=>e);
@@ -230,7 +231,7 @@ test('expired claims are reclaimable and jobs that exhaust max_attempts fail ter
     const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
     const company=boot.body.companies[0].id;
     const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
-    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'RETRY-DESKTOP'}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'RETRY-DESKTOP',installationId:'inst_00000000-0000-4000-8000-000000000008'}),env));
     const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
 
     const customer=await json(await handleRequest(request('/api/customers','POST',token,{idempotencyKey:'retry-1',customer:{name:'Retry Co'}},{'x-company-id':company}),env));
@@ -263,7 +264,7 @@ test('the canonical connector provisioning sequence reaches ready from the post-
     const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
     const company=boot.body.companies[0].id;
     const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
-    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'FSM-DESKTOP'}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'FSM-DESKTOP',installationId:'inst_00000000-0000-4000-8000-000000000009'}),env));
     const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
 
     const readState=async()=>(await json(await handleRequest(request(`/api/companies/${company}/provisioning`,'GET',token,undefined,{'x-company-id':company}),env))).body.provisioning;
@@ -310,7 +311,7 @@ test('invoice sync writes and reads back due_date and balance (A/R aging depends
     const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
     const company=boot.body.companies[0].id;
     const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
-    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'AR-DESKTOP'}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'AR-DESKTOP',installationId:'inst_00000000-0000-4000-8000-00000000000a'}),env));
     const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
 
     // A paid invoice (balance 0), an open one with a due date, and one with

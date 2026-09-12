@@ -84,7 +84,8 @@ export async function exchangePairing(request: Request, env: Env, ip: string) {
   if(!isRecord(body)||!validatePairingCode(pairingCode)) throw new HttpError(400,'Invalid pairing code format','INVALID_PAIRING_CODE');
   const machineName=requiredString(body.machineName??body.name,'machineName',160);
   const connectorVersion=requiredString(body.connectorVersion,'connectorVersion',50);
-  const installation=typeof body.installationId==='string'&&body.installationId.trim()?body.installationId.trim().slice(0,200):null;
+  const installation=requiredString(body.installationId,'installationId',200);
+  if(!/^inst_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(installation)) throw new HttpError(400,'Invalid installationId','INVALID_INSTALLATION_ID');
   const hash=await hashSecret(pairingCode);
   const row=await env.DB.prepare(`SELECT * FROM pairing_codes WHERE code_hash=?`).bind(hash).first<any>();
   if(!row) throw new HttpError(401,'Invalid pairing code','INVALID_PAIRING_CODE');
@@ -93,15 +94,17 @@ export async function exchangePairing(request: Request, env: Env, ip: string) {
     await env.DB.prepare(`UPDATE pairing_codes SET status='expired' WHERE id=? AND status='active'`).bind(row.id).run();
     throw new HttpError(410,'Pairing code expired','PAIRING_EXPIRED');
   }
-  if(installation) {
-    const duplicate=await env.DB.prepare(`SELECT id FROM connectors WHERE organization_id=? AND installation_id=? AND revoked_at IS NULL`).bind(row.organization_id,installation).first();
-    if(duplicate) throw new HttpError(409,'Installation is already paired','INSTALLATION_ALREADY_PAIRED');
-  }
-  const connector=`conn_${crypto.randomUUID()}`, credentialId=`cred_${crypto.randomUUID()}`, credential=`sbc_${randomSecret(48)}`;
+  const existing=await env.DB.prepare(`SELECT id,organization_id,company_id FROM connectors WHERE installation_id=?`).bind(installation).first<any>();
+  if(existing&&(existing.organization_id!==row.organization_id||existing.company_id!==row.company_id)) throw new HttpError(409,'Installation is already bound to another organization or company','INSTALLATION_BINDING_CONFLICT');
+  const connector=existing?.id??`conn_${crypto.randomUUID()}`, credentialId=`cred_${crypto.randomUUID()}`, credential=`sbc_${randomSecret(48)}`;
   const credentialHash=await hashSecret(credential), pairedAt=new Date().toISOString();
+  const connectorMutation=existing
+    ? env.DB.prepare(`UPDATE connectors SET display_name=?,machine_name=?,version=?,connector_version=?,status='active',revoked_at=NULL,last_seen_at=?,paired_at=?,provisioning_state='connector_connected',updated_at=? WHERE id=? AND organization_id=? AND company_id=? AND installation_id=?`).bind(machineName,machineName,connectorVersion,connectorVersion,pairedAt,pairedAt,pairedAt,connector,row.organization_id,row.company_id,installation)
+    : env.DB.prepare(`INSERT INTO connectors(id,organization_id,company_id,installation_id,display_name,machine_name,version,connector_version,last_seen_at,paired_at,provisioning_state) SELECT ?,organization_id,company_id,?,?,?,?,?,?,?,'connector_connected' FROM pairing_codes WHERE id=? AND claimed_connector_id=?`).bind(connector,installation,machineName,machineName,connectorVersion,connectorVersion,pairedAt,pairedAt,row.id,connector);
   const results=await env.DB.batch([
     env.DB.prepare(`UPDATE pairing_codes SET status='consumed',consumed_at=?,attempts=attempts+1,claimed_connector_id=? WHERE id=? AND status='active' AND expires_at>CURRENT_TIMESTAMP AND claimed_connector_id IS NULL`).bind(pairedAt,connector,row.id),
-    env.DB.prepare(`INSERT INTO connectors(id,organization_id,company_id,installation_id,display_name,machine_name,version,connector_version,last_seen_at,paired_at,provisioning_state) SELECT ?,organization_id,company_id,?,?,?,?,?,?,?,'connector_connected' FROM pairing_codes WHERE id=? AND claimed_connector_id=?`).bind(connector,installation,machineName,machineName,connectorVersion,connectorVersion,pairedAt,pairedAt,row.id,connector),
+    connectorMutation,
+    env.DB.prepare(`UPDATE connector_credentials SET revoked_at=? WHERE connector_id=? AND revoked_at IS NULL`).bind(pairedAt,connector),
     env.DB.prepare(`INSERT INTO connector_credentials(id,connector_id,token_hash) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM pairing_codes WHERE id=? AND claimed_connector_id=?)`).bind(credentialId,connector,credentialHash,row.id,connector),
     env.DB.prepare(`UPDATE companies SET connector_status='connected',last_seen_at=? WHERE id=? AND organization_id=? AND EXISTS(SELECT 1 FROM pairing_codes WHERE id=? AND claimed_connector_id=?)`).bind(pairedAt,row.company_id,row.organization_id,row.id,connector),
     env.DB.prepare(`UPDATE provisioning SET state='connector_connected',progress=10,error_code=NULL,error_message=NULL,updated_at=? WHERE company_id=? AND organization_id=? AND state='awaiting_connector' AND EXISTS(SELECT 1 FROM pairing_codes WHERE id=? AND claimed_connector_id=?)`).bind(pairedAt,row.company_id,row.organization_id,row.id,connector),
