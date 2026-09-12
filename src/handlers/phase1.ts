@@ -126,8 +126,18 @@ export async function heartbeat(request: Request,c: ConnectorContext,env: Env) {
   const sageVersion=typeof body.sageVersion==='string'?body.sageVersion.slice(0,50):null;
   const health=JSON.stringify({version,sageConnected:body.sageConnected===true});
   await env.DB.batch([
-    env.DB.prepare(`UPDATE connectors SET last_seen_at=CURRENT_TIMESTAMP,version=?,connector_version=?,sage_version=?,health_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revoked_at IS NULL`).bind(version,version,sageVersion,health,c.connectorId),
-    env.DB.prepare(`UPDATE companies SET last_seen_at=CURRENT_TIMESTAMP,connector_status='connected' WHERE id=? AND organization_id=?`).bind(c.companyId,c.organizationId),
+    env.DB.prepare(`
+      UPDATE connectors
+      SET last_seen_at=CURRENT_TIMESTAMP,version=?,connector_version=?,sage_version=?,health_json=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND revoked_at IS NULL
+        AND (last_seen_at IS NULL OR last_seen_at<=datetime('now','-60 seconds')
+          OR version IS NOT ? OR connector_version IS NOT ? OR sage_version IS NOT ? OR health_json IS NOT ?)
+    `).bind(version,version,sageVersion,health,c.connectorId,version,version,sageVersion,health),
+    env.DB.prepare(`
+      UPDATE companies SET last_seen_at=CURRENT_TIMESTAMP,connector_status='connected'
+      WHERE id=? AND organization_id=?
+        AND (last_seen_at IS NULL OR last_seen_at<=datetime('now','-60 seconds') OR connector_status IS NOT 'connected')
+    `).bind(c.companyId,c.organizationId),
   ]);
   return jsonResponse({ok:true,staleAfterSeconds:120});
 }
