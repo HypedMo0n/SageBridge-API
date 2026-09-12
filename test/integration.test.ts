@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, createSign } from 'node:crypto';
 import { Miniflare } from 'miniflare';
 import { handleRequest } from '../src/router.ts';
 import worker from '../src/index.ts';
 
-const root=new URL('..',import.meta.url).pathname;
+const root=fileURLToPath(new URL('..',import.meta.url));
 const project='integration-project';
 const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk=publicKey.export({format:'jwk'}) as JsonWebKey;
@@ -33,7 +34,7 @@ const json=async(response:Response)=>({status:response.status,body:await respons
 async function database() {
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("ok")}}',d1Databases:{DB:'integration-db'}});
   const db=(await mf.getBindings()).DB as D1Database;
-  const sql=(file:string)=>readFileSync(join(root,file),'utf8').split('\n').map(line=>line.replace(/--.*$/,'')).join(' ');
+  const sql=(file:string)=>readFileSync(join(root,file),'utf8').replace(/\r/g,'').split('\n').map(line=>line.replace(/--.*$/,'')).join(' ');
   await db.exec(sql('schema.sql'));
   await db.exec(sql('migrations/add-job-queue.sql'));
   await db.exec(sql('migrations/0002_job_idempotency_hardening.sql'));
@@ -62,6 +63,23 @@ test('unverified and missing-email-verification Firebase users cannot bootstrap'
     assert.deepEqual(await json(await handleRequest(request('/auth/bootstrap','POST',jwt('false-user',false)),env)),{status:403,body:{error:'Verified email required',code:'EMAIL_NOT_VERIFIED'}});
     assert.equal((await json(await handleRequest(request('/auth/bootstrap','POST',jwt('missing-user',null)),env))).status,403);
     assert.equal((await env.DB.prepare(`SELECT count(*) n FROM users WHERE auth_subject IN ('false-user','missing-user')`).first<any>()).n,0);
+  } finally {await mf.dispose()}
+});
+
+test('synced quotes are returned to authorized company users',async()=>{
+  const {mf,env}=await database();
+  try {
+    const token=jwt('quote-reader');
+    const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
+    const company=boot.body.companies[0].id;
+    const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'QUOTE-READER'}),env));
+    const syncedQuote={Id:'16',QuoteNumber:'QT-20260912-001',CustomerId:'33',CustomerName:'Rayan Nair',Date:'2026-09-12',Subtotal:2000,TaxAmount:100,TotalAmount:2100,Lines:[{Sku:'S3040',Quantity:1,UnitPrice:1000,LineTotal:1000},{Sku:'S1040',Quantity:1,UnitPrice:1000,LineTotal:1000}]};
+    assert.equal((await json(await handleRequest(connectorRequest('/sync/quotes','POST',exchange.body.connectorId,exchange.body.credential,{Quotes:[syncedQuote]}),env))).status,200);
+    const listed=await json(await handleRequest(request('/api/quotes','GET',token,undefined,{'x-company-id':company}),env));
+    assert.equal(listed.status,200);
+    assert.deepEqual(listed.body.quotes,[syncedQuote]);
+    assert.equal(listed.body.count,1);
   } finally {await mf.dispose()}
 });
 

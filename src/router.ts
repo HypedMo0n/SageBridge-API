@@ -6,7 +6,7 @@ import { handleHealth } from './handlers/health';
 import { handleGetCustomers,handleGetCustomer,handleCreateCustomer } from './handlers/customers';
 import { handleGetInvoices,handleGetInvoice,handleCreateInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
-import { handleCreateQuote } from './handlers/quotes';
+import { handleCreateQuote,handleGetQuotes } from './handlers/quotes';
 import { handleSyncCustomers,handleSyncInvoices,handleSyncProducts,handleSyncQuotes,handleSyncInvoiceSummary } from './handlers/sync';
 import { handleGetJob } from './handlers/jobs';
 import { handleGetConnectorJobs,handleStartJob,handleJobResult } from './handlers/connector';
@@ -65,6 +65,7 @@ async function routeRequest(request:Request,env:Env):Promise<Response>{
     if(id&&method==='GET') return handleGetInvoice(org,company,id,env);
     if(path==='/api/invoices'&&method==='POST') return handleCreateInvoice(org,company,request,env);
     if(path==='/api/products'&&method==='GET') return handleGetProducts(org,company,env);
+    if(path==='/api/quotes'&&method==='GET') return handleGetQuotes(org,company,env);
     if(path==='/api/quotes'&&method==='POST') return handleCreateQuote(org,company,request,env);
     id=capture(path,/^\/api\/jobs\/([\w-]+)$/);
     if(id&&method==='GET') return handleGetJob(id,org,company,env);
