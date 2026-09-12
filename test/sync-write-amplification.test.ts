@@ -42,8 +42,8 @@ async function database() {
 async function syncCustomer(env: any, name = 'Acme') {
   return handleSyncCustomers(request({ Customers: [{ Id: 'C1', Name: name, Email: 'a@example.com', Phone: '555', Balance: 10, Status: 'Active' }] }), env, tenantId, companyId, connectorId);
 }
-async function syncInvoice(env: any, total = 100) {
-  return handleSyncInvoices(request({ Invoices: [{ Id: 'I1', CustomerId: 'C1', InvoiceNumber: 'INV-1', Date: '2026-09-12', Total: total, Balance: total, Status: 'Unpaid' }] }), env, tenantId, companyId, connectorId);
+async function syncInvoice(env: any, total = 100, dueDate = '2026-10-12') {
+  return handleSyncInvoices(request({ Invoices: [{ Id: 'I1', CustomerId: 'C1', InvoiceNumber: 'INV-1', Date: '2026-09-12', DueDate: dueDate, Total: total, Balance: total, Status: 'Unpaid' }] }), env, tenantId, companyId, connectorId);
 }
 async function syncProduct(env: any, price = 20) {
   return handleSyncProducts(request({ Products: [{ Id: 'P1', SKU: 'SKU-1', Name: 'Widget', Price: price, Stock: 5, ReorderLevel: 2, Category: 'Parts' }] }), env, tenantId, companyId, connectorId);
@@ -84,6 +84,10 @@ test('customer upsert skips identical business data and persists a real change',
 
 test('invoice upsert skips identical business data and persists a real change', async () => {
   await assertConditionalMutation('invoices', env => syncInvoice(env), env => syncInvoice(env, 125), 'total', 125);
+});
+
+test('invoice upsert persists a due-date business change', async () => {
+  await assertConditionalMutation('invoices', env => syncInvoice(env), env => syncInvoice(env, 100, '2026-11-12'), 'due_date', '2026-11-12');
 });
 
 test('product upsert skips identical business data and persists a real change', async () => {

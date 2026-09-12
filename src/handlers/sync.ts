@@ -147,6 +147,7 @@ export async function handleSyncInvoices(request: Request, env: Env, tenantId: s
           WHERE invoices.customer_sage_id IS NOT excluded.customer_sage_id
              OR invoices.invoice_number IS NOT excluded.invoice_number
              OR invoices.date IS NOT excluded.date
+             OR invoices.due_date IS NOT excluded.due_date
              OR invoices.total IS NOT excluded.total
              OR invoices.balance IS NOT excluded.balance
              OR invoices.status IS NOT excluded.status
