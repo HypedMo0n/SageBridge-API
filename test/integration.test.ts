@@ -238,6 +238,53 @@ test('expired claims are reclaimable and jobs that exhaust max_attempts fail ter
   } finally {await mf.dispose()}
 });
 
+test('the canonical connector provisioning sequence reaches ready from the post-pairing state, and startProvisioning does not race it',async()=>{
+  const {mf,env}=await database();
+  try {
+    const token=jwt('provisioning-sequence-user');
+    const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
+    const company=boot.body.companies[0].id;
+    const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'FSM-DESKTOP'}),env));
+    const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
+
+    const readState=async()=>(await json(await handleRequest(request(`/api/companies/${company}/provisioning`,'GET',token,undefined,{'x-company-id':company}),env))).body.provisioning;
+    assert.equal((await readState()).state,'connector_connected');
+
+    // Prove the exact regression: 'connector_connected' only allows
+    // 'checking_sage' next (see phase1.ts NEXT). Skipping straight to
+    // 'company_selected' - the sequence SyncEngine.cs sent before this fix -
+    // must 409, which is why every report in that chain failed in production.
+    const skipped=await json(await handleRequest(connectorRequest('/connector/provisioning','POST',connectorId,credential,{state:'company_selected',progress:30}),env));
+    assert.equal(skipped.status,409); assert.equal(skipped.body.code,'INVALID_PROVISIONING_TRANSITION');
+    assert.equal((await readState()).state,'connector_connected','a rejected transition must not change the stored state');
+
+    // A human opening the app can trigger startProvisioning concurrently
+    // with the connector's own reporting. Both target 'checking_sage' from
+    // 'connector_connected'; whichever lands first must not break the other.
+    assert.equal((await json(await handleRequest(request(`/api/companies/${company}/provisioning`,'POST',token),env))).body.provisioning.state,'checking_sage');
+
+    // The exact sequence SyncEngine.cs sends, in order, with strictly
+    // increasing progress - the canonical sequence the API and connector
+    // must agree on. The first entry re-affirms 'checking_sage' (same state,
+    // higher progress than startProvisioning's 15) to prove that is a safe
+    // no-op rather than a conflicting transition.
+    const sequence=[
+      ['checking_sage',20],['company_selected',30],['provisioning',40],
+      ['syncing_customers',55],['syncing_invoices',65],['syncing_products',75],
+      ['syncing_quotes',85],['finalizing',95],['ready',100],
+    ] as const;
+    for(const [state,progress] of sequence) {
+      const result=await json(await handleRequest(connectorRequest('/connector/provisioning','POST',connectorId,credential,{state,progress}),env));
+      assert.equal(result.status,200,`transition to ${state} should succeed, got ${JSON.stringify(result.body)}`);
+      assert.equal(result.body.provisioning.state,state);
+    }
+
+    const final=await readState();
+    assert.equal(final.state,'ready'); assert.equal(final.progress,100);
+  } finally {await mf.dispose()}
+});
+
 test('CORS reflects configured origins only and rejects disallowed preflight',async()=>{
   const {mf,env}=await database();
   try {
