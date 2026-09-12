@@ -8,6 +8,25 @@ import { createJob } from './connector';
 import { QuoteInput, QuoteLineInput, validateQuotePayload } from '../utils/quote-validation';
 import { parseBoundedJson } from '../security/security';
 
+export async function handleGetQuotes(
+  tenantId: string,
+  companyId: string,
+  env: Env
+): Promise<Response> {
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT payload_json FROM quotes
+      WHERE tenant_id = ? AND company_id = ?
+      ORDER BY last_synced_at DESC, sage_id DESC
+    `).bind(tenantId, companyId).all<{ payload_json: string }>();
+    const quotes = results.map((row) => JSON.parse(row.payload_json));
+    return jsonResponse({ quotes, count: quotes.length });
+  } catch (error) {
+    console.error('Failed to fetch quotes:', error);
+    return jsonResponse({ error: 'Failed to fetch quotes' }, 500);
+  }
+}
+
 export async function handleCreateQuote(
   tenantId: string,
   companyId: string,
