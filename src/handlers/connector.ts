@@ -15,10 +15,27 @@ export async function handleGetConnectorJobs(
   connectorId?: string
 ): Promise<Response> {
   try {
+    // A job whose claim expired after exhausting max_attempts is no longer
+    // reclaimable (see the WHERE clause below) and would otherwise stay
+    // stuck in 'claimed'/'running' forever, blocking retry under its
+    // idempotency key. Fail it out here so it reaches a terminal state.
+    await env.DB.prepare(`
+      UPDATE connector_jobs
+      SET status = 'failed',
+          error = 'Exceeded max retry attempts',
+          completed_at = datetime('now'),
+          claim_expires_at = NULL
+      WHERE tenant_id = ?
+        AND company_id = ?
+        AND status IN ('claimed','running')
+        AND claim_expires_at < datetime('now')
+        AND attempts >= max_attempts
+    `).bind(tenantId, companyId).run();
+
     const { results } = await env.DB.prepare(`
       SELECT id, action, payload, request_id, attempts, created_at
       FROM connector_jobs
-      WHERE tenant_id = ? 
+      WHERE tenant_id = ?
         AND company_id = ?
         AND (status = 'pending' OR (status IN ('claimed','running') AND claim_expires_at < datetime('now') AND attempts < max_attempts))
       ORDER BY created_at ASC

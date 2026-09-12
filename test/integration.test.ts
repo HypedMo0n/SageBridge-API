@@ -164,6 +164,39 @@ test('routes enforce tenant isolation, pairing lifecycle, connector scope, provi
   } finally {await mf.dispose()}
 });
 
+test('expired claims are reclaimable and jobs that exhaust max_attempts fail terminally',async()=>{
+  const {mf,env}=await database();
+  try {
+    const token=jwt('retry-user');
+    const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
+    const company=boot.body.companies[0].id;
+    const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'RETRY-DESKTOP'}),env));
+    const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
+
+    const customer=await json(await handleRequest(request('/api/customers','POST',token,{idempotencyKey:'retry-1',customer:{name:'Retry Co'}},{'x-company-id':company}),env));
+    const jobId=customer.body.jobId;
+
+    // Claim once, then let the claim expire without a result: the job must stay reclaimable.
+    assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/start`,'POST',connectorId,credential),env))).status,200);
+    await env.DB.prepare(`UPDATE connector_jobs SET claim_expires_at=datetime('now','-1 second') WHERE id=?`).bind(jobId).run();
+    const listed=await json(await handleRequest(connectorRequest('/connector/jobs','GET',connectorId,credential),env));
+    assert.ok(listed.body.jobs.some((j:any)=>j.jobId===jobId));
+    assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/start`,'POST',connectorId,credential),env))).status,200);
+    assert.equal((await env.DB.prepare(`SELECT attempts,status FROM connector_jobs WHERE id=?`).bind(jobId).first<any>()).attempts,2);
+
+    // Once attempts reach max_attempts (5) with an expired claim and no result, the job
+    // must stop being handed out and must resolve to a terminal 'failed' state rather
+    // than staying stuck in 'running' forever.
+    await env.DB.prepare(`UPDATE connector_jobs SET attempts=5,claim_expires_at=datetime('now','-1 second') WHERE id=?`).bind(jobId).run();
+    const afterExhausted=await json(await handleRequest(connectorRequest('/connector/jobs','GET',connectorId,credential),env));
+    assert.ok(!afterExhausted.body.jobs.some((j:any)=>j.jobId===jobId));
+    const finalStatus=await json(await handleRequest(request(`/api/jobs/${jobId}`,'GET',token,undefined,{'x-company-id':company}),env));
+    assert.equal(finalStatus.body.status,'failed');
+    assert.equal(finalStatus.body.error,'Exceeded max retry attempts');
+  } finally {await mf.dispose()}
+});
+
 test('CORS reflects configured origins only and rejects disallowed preflight',async()=>{
   const {mf,env}=await database();
   try {
