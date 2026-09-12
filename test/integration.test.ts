@@ -285,6 +285,41 @@ test('the canonical connector provisioning sequence reaches ready from the post-
   } finally {await mf.dispose()}
 });
 
+test('invoice sync writes and reads back due_date and balance (A/R aging depends on both)',async()=>{
+  const {mf,env}=await database();
+  try {
+    const token=jwt('ar-aging-user');
+    const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
+    const company=boot.body.companies[0].id;
+    const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'AR-DESKTOP'}),env));
+    const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
+
+    // A paid invoice (balance 0), an open one with a due date, and one with
+    // no due date at all (the connector may not always resolve it) - the
+    // sync payload shape matches what SyncEngine.cs actually sends.
+    const sync=await json(await handleRequest(connectorRequest('/sync/invoices','POST',connectorId,credential,{Invoices:[
+      {Id:'INV-PAID',InvoiceNumber:'1001',Date:'2026-01-01',DueDate:'2026-01-31',Total:500,Balance:0,Status:'Paid'},
+      {Id:'INV-OPEN',InvoiceNumber:'1002',Date:'2026-02-01',DueDate:'2026-03-03',Total:750.5,Balance:250.25,Status:'Unpaid'},
+      {Id:'INV-NODUE',InvoiceNumber:'1003',Date:'2026-02-15',Total:100,Balance:100,Status:'Unpaid'},
+    ]}),env));
+    assert.equal(sync.status,200); assert.equal(sync.body.synced,3);
+
+    const list=await json(await handleRequest(request('/api/invoices','GET',token,undefined,{'x-company-id':company}),env));
+    const bySageId=Object.fromEntries(list.body.invoices.map((i:any)=>[i.sageId,i]));
+
+    assert.equal(bySageId['INV-PAID'].balance,0);
+    assert.equal(bySageId['INV-PAID'].dueDate?.slice(0,10),'2026-01-31');
+
+    assert.equal(bySageId['INV-OPEN'].balance,250.25);
+    assert.equal(bySageId['INV-OPEN'].total,750.5);
+    assert.equal(bySageId['INV-OPEN'].dueDate?.slice(0,10),'2026-03-03');
+
+    assert.equal(bySageId['INV-NODUE'].balance,100);
+    assert.equal(bySageId['INV-NODUE'].dueDate,null);
+  } finally {await mf.dispose()}
+});
+
 test('CORS reflects configured origins only and rejects disallowed preflight',async()=>{
   const {mf,env}=await database();
   try {

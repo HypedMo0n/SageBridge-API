@@ -126,12 +126,13 @@ export async function handleSyncInvoices(request: Request, env: Env, tenantId: s
         await env.DB.prepare(`
           INSERT INTO invoices (
             tenant_id, company_id, sage_id, customer_sage_id, invoice_number,
-            date, total, balance, status, last_synced_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            date, due_date, total, balance, status, last_synced_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(tenant_id, company_id, sage_id) DO UPDATE SET
             customer_sage_id = excluded.customer_sage_id,
             invoice_number = excluded.invoice_number,
             date = excluded.date,
+            due_date = excluded.due_date,
             total = excluded.total,
             balance = excluded.balance,
             status = excluded.status,
@@ -143,6 +144,7 @@ export async function handleSyncInvoices(request: Request, env: Env, tenantId: s
           invoice.CustomerId || null,
           invoice.InvoiceNumber,
           invoice.Date,
+          invoice.DueDate || null,
           invoice.Total || 0,
           invoice.Balance || 0,
           invoice.Status || 'Unpaid'
