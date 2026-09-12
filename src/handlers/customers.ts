@@ -29,8 +29,9 @@ export async function handleGetCustomers(
       tenantId,
       companyId
     });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch customers:', error);
+    return jsonResponse({ error: 'Failed to fetch customers' }, 500);
   }
 }
 
@@ -51,8 +52,9 @@ export async function handleGetCustomer(
     }
 
     return jsonResponse({ customer });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch customer:', error);
+    return jsonResponse({ error: 'Failed to fetch customer' }, 500);
   }
 }
 
@@ -119,7 +121,8 @@ export async function handleCreateCustomer(
       status: 'pending',
       message: 'Customer creation job queued'
     }, 201);
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to create customer job:', error);
+    return jsonResponse({ error: 'Failed to create customer' }, 500);
   }
 }

@@ -1,56 +1,66 @@
 # 🌩️ SageBridge Cloudflare Workers API
 
-**Multi-tenant cloud backend for SageBridge mobile app**
+**Multi-tenant cloud backend for the SageBridge mobile/web app and Windows Connector**
 
 ---
 
 ## 🎯 What This Does
 
 This is the **cloud API layer** that:
-- ✅ Receives sync data from Windows Connectors
-- ✅ Stores data in Cloudflare D1 (SQLite)
-- ✅ Serves data to mobile apps via REST API
-- ✅ Handles multi-tenant isolation (10,000+ companies)
-- ✅ Runs on Cloudflare's global edge network (fast!)
+- ✅ Authenticates app users via Firebase ID tokens
+- ✅ Pairs and authenticates Windows Connectors via one-time pairing codes and per-connector credentials
+- ✅ Queues write requests (e.g. `customer.create`, `quote.create`) for the connector to execute against Sage 50
+- ✅ Receives sync data pushed from Windows Connectors and stores it in Cloudflare D1 (SQLite)
+- ✅ Serves read data to the mobile/web app via REST
+- ✅ Enforces multi-tenant isolation (organization → company scoping) on every query
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-📱 Mobile App
-    ↓
-☁️ Cloudflare Workers API (this project)
-    ↓
-💾 Cloudflare D1 Database (multi-tenant SQLite)
-    ↑
-🔄 Sync from Windows Connector
+📱 Mobile / Web App  --(Firebase ID token)-->  ☁️ Cloudflare Workers API  <--(connector credential)--  🔄 Windows Connector
+                                                        ↓
+                                                💾 Cloudflare D1 (SQLite)
+                                                        ↑
+                                              🖥️ Official Sage 50 SDK (via Connector)
 ```
+
+Writes (e.g. creating a customer) are never applied directly to Sage 50 by this API. The app enqueues a job; the paired
+connector for that company claims it, executes it against Sage 50 with the official SDK, and reports the terminal result
+back to the API.
 
 ---
 
 ## 📦 What's Included
 
 ```
-sagebridge-workers/
+sagebridge-api/
 ├── src/
-│   ├── index.ts                  # Main entry point
-│   ├── router.ts                 # API routes
-│   ├── middleware/
-│   │   └── auth.ts               # API key authentication
+│   ├── index.ts                  # Worker entry point + CORS wrapper
+│   ├── router.ts                 # Route table
+│   ├── security/
+│   │   ├── firebase-jwt.ts       # RS256 verification of Firebase ID tokens
+│   │   ├── access.ts             # requireUser / requireConnector / tenant scoping
+│   │   └── security.ts           # HttpError, hashing, bounded JSON parsing, validators
 │   ├── handlers/
 │   │   ├── health.ts             # Health check
-│   │   ├── customers.ts          # Customer endpoints
+│   │   ├── phase1.ts             # Bootstrap, organizations, companies, pairing, provisioning
+│   │   ├── customers.ts          # Customer read + create-job endpoints
 │   │   ├── invoices.ts           # Invoice endpoints
 │   │   ├── products.ts           # Product endpoints
-│   │   └── sync.ts               # Connector sync endpoints
+│   │   ├── quotes.ts             # Quote create-job endpoint
+│   │   ├── jobs.ts               # Frontend-facing job status endpoint
+│   │   ├── connector.ts          # Connector-facing job queue (list/claim/result)
+│   │   └── sync.ts               # Connector → cloud data sync endpoints
 │   └── utils/
-│       ├── cors.ts               # CORS headers
-│       └── response.ts           # Response helpers
-├── schema.sql                    # D1 database schema
+│       ├── cors.ts               # Origin allowlist (FRONTEND_ORIGINS)
+│       ├── response.ts           # JSON response helper
+│       └── idempotency.ts        # Payload-fingerprinted idempotency keys
+├── schema.sql                    # Base D1 schema
+├── migrations/                   # Incremental D1 migrations (run in order)
 ├── wrangler.toml                 # Cloudflare config
-├── package.json                  # Dependencies
-└── tsconfig.json                 # TypeScript config
+└── test/                         # node:test suite (unit + Miniflare integration)
 ```
 
 ---
@@ -83,154 +93,151 @@ database_id = "YOUR_DATABASE_ID_HERE"  # Paste the ID here
 ### 4. Create Tables
 ```bash
 npx wrangler d1 execute sagebridge-db --file=./schema.sql
+# then apply each file in migrations/ in order
 ```
 
-### 5. Deploy to Cloudflare
+### 5. Configure required variables
+Set in `wrangler.toml` `[vars]` (or `wrangler secret put` for anything sensitive):
+- `FIREBASE_PROJECT_ID` — the Firebase project used to issue user ID tokens
+- `FRONTEND_ORIGINS` — comma-separated list of allowed CORS origins
+
+### 6. Deploy to Cloudflare
 ```bash
 npm run deploy
 ```
 
-**You'll get a URL like:** `https://sagebridge-api.YOUR_SUBDOMAIN.workers.dev`
-
 ---
 
-## 🧪 Test the API
+## 🧪 Test
+
+```bash
+npm test          # unit + Miniflare integration tests (test/*.test.ts)
+npx tsc --noEmit   # typecheck
+```
 
 ### Health Check
 ```bash
 curl https://sagebridge-api.YOUR_SUBDOMAIN.workers.dev/health
 ```
 
-**Expected response:**
-```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "version": "1.0.0"
-}
-```
-
-### Get Customers (Demo Data)
-```bash
-curl https://sagebridge-api.YOUR_SUBDOMAIN.workers.dev/api/customers \
-  -H "X-API-Key: demo-key"
-```
-
-**Expected:** 4 demo customers from schema
-
-### Get Invoices
-```bash
-curl https://sagebridge-api.YOUR_SUBDOMAIN.workers.dev/api/invoices \
-  -H "X-API-Key: demo-key"
-```
-
-### Get Products
-```bash
-curl https://sagebridge-api.YOUR_SUBDOMAIN.workers.dev/api/products \
-  -H "X-API-Key: demo-key"
-```
-
 ---
 
 ## 📊 API Endpoints
 
-### Public Endpoints
+### Public
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/health` | Health check (no auth required) |
+| GET | `/health` | Health check (no auth) |
+| POST | `/connector/pairing/validate` or `/auth/pairing/exchange` | Exchange a pairing code for connector credentials |
 
-### Mobile App Endpoints (requires `X-API-Key` header)
+### App user endpoints (require `Authorization: Bearer <Firebase ID token>`)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/customers` | List all customers |
-| GET | `/api/customers/{id}` | Get single customer |
-| POST | `/api/customers` | Create customer |
-| GET | `/api/invoices` | List all invoices |
-| GET | `/api/invoices/{id}` | Get single invoice |
-| GET | `/api/products` | List all products |
+| POST | `/auth/bootstrap` | First-login bootstrap: creates the user's org/company if needed |
+| GET | `/auth/me` | Current user + organization memberships |
+| GET | `/api/organizations/{organizationId}/companies` | List companies in an organization |
+| POST | `/api/organizations/{organizationId}/companies` | Create a company (owner/admin) |
+| POST | `/api/companies/{companyId}/pairing-codes` | Generate a one-time connector pairing code (owner/admin) |
+| GET | `/api/companies/{companyId}/connectors` | List connectors paired to a company |
+| GET | `/api/companies/{companyId}/provisioning` | Read provisioning status |
+| POST | `/api/companies/{companyId}/provisioning` | Start/retry provisioning once a connector is online (owner/admin) |
+| POST | `/(api/)connectors/{id}/revoke` | Revoke a connector (owner/admin) |
 
-### Connector Sync Endpoints (requires `X-API-Key` header)
+The endpoints below additionally require an `X-Company-Id` header identifying a company the caller belongs to:
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/sync/customers` | Sync customers from connector |
-| POST | `/sync/invoices` | Sync invoices from connector |
-| POST | `/sync/products` | Sync products from connector |
+| GET | `/api/customers` | List customers |
+| GET | `/api/customers/{id}` | Get a single customer |
+| POST | `/api/customers` | Enqueue a `customer.create` job (body: `{ customer, idempotencyKey }`) |
+| GET | `/api/invoices` | List invoices |
+| GET | `/api/invoices/{id}` | Get a single invoice |
+| GET | `/api/products` | List products/services |
+| POST | `/api/quotes` | Enqueue a `quote.create` job (body: `{ quote, idempotencyKey }`) |
+| GET | `/api/jobs/{id}` | Get the status/result of a queued job |
+
+### Connector endpoints (require `X-Connector-Id` + `X-Connector-Credential` headers)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/connector/heartbeat` | Report liveness + Sage connection status |
+| POST | `/connector/provisioning` | Report provisioning state/progress |
+| GET | `/connector/jobs` | List claimable jobs for this connector's company |
+| POST | `/connector/jobs/{id}/start` | Claim a job |
+| POST | `/connector/jobs/{id}/result` | Submit a job's terminal result |
+| POST | `/sync/customers` \| `/sync/invoices` \| `/sync/products` \| `/sync/quotes` \| `/sync/invoice-summary` | Push a full snapshot from Sage 50 |
 
 ---
 
 ## 🔐 Authentication
 
-All endpoints (except `/health`) require an API key in the `X-API-Key` header.
+There is no shared API key. Two independent, scoped credential types are used:
 
-### Demo Mode
-Use `X-API-Key: demo-key` to access demo data.
+### App users — Firebase ID tokens
+The app authenticates users with Firebase Auth and sends the resulting ID token as `Authorization: Bearer <token>` on
+every request. The Worker verifies the token's RS256 signature against Google's published JWKs, and checks issuer,
+audience (`FIREBASE_PROJECT_ID`), expiry, and `email_verified`. A verified user is mapped to a stable internal user id;
+unverified emails are rejected with `403 EMAIL_NOT_VERIFIED`.
 
-### Production Mode
-API keys should be in format: `{tenantId}_{companyId}_{randomString}`
+### Windows Connector — pairing + per-connector credential
+1. An owner/admin generates a short-lived, single-use pairing code from the app (`POST /api/companies/{id}/pairing-codes`).
+2. The connector exchanges that code once (`POST /connector/pairing/validate`) for a `connectorId` + `credential`.
+3. The credential is stored hashed (SHA-256) server-side; the connector presents it on every subsequent request via
+   `X-Connector-Id` / `X-Connector-Credential`. Credentials can be revoked per-connector at any time.
 
-Example: `acme-corp_main-company_a8f3j2k1m9`
+All tenant-scoped queries filter by both `organization_id` (tenant) and `company_id`, resolved from the authenticated
+caller — never from client-supplied identifiers alone.
 
 ---
 
 ## 🗄️ Database Schema
 
 ### Multi-Tenant Design
-Every table includes:
-- `tenant_id` - Organization/account ID
-- `company_id` - Sage 50 company within that tenant
+Every tenant-scoped table includes:
+- `tenant_id` / `organization_id` — the organization that owns the data
+- `company_id` — the Sage 50 company within that organization
 
-**Critical:** All queries MUST include both:
-```sql
-WHERE tenant_id = ? AND company_id = ?
-```
+**Critical:** every read/write query filters by both, derived from the authenticated caller.
 
 ### Tables
-- **tenants** - Organizations
-- **companies** - Sage 50 companies
-- **users** - User accounts
-- **api_keys** - API authentication
-- **customers** - Sage 50 customers
-- **invoices** - Sage 50 invoices
-- **products** - Sage 50 products/services
-- **projects** - Sage 50 projects
-- **sync_events** - Sync audit log
+- **tenants / organizations** — accounts and their membership
+- **companies** — Sage 50 companies within an organization
+- **users** — app users (mapped from Firebase UID)
+- **connectors / connector_credentials / pairing_codes** — Windows Connector pairing and credentials
+- **connector_jobs** — the write job queue (`customer.create`, `quote.create`, …) with idempotency keys
+- **provisioning** — per-company onboarding state machine
+- **customers / invoices / products / quotes / invoice_summaries** — synced Sage 50 data
+- **sync_events / audit_events** — sync and security audit logs
+- **rate_limit_counters** — fixed-window rate limiting for pairing endpoints
 
 ---
 
 ## 🔄 How Sync Works
 
-### 1. Connector Pushes Data
-Windows Connector sends POST request:
+### 1. Connector pushes a full snapshot
 ```bash
 curl -X POST https://api.sagebridge.workers.dev/sync/customers \
-  -H "X-API-Key: demo-tenant_demo-company_key" \
+  -H "X-Connector-Id: conn_..." \
+  -H "X-Connector-Credential: sbc_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "TenantId": "demo-tenant",
-    "CompanyId": "demo-company",
     "Customers": [
-      {
-        "Id": "CUST001",
-        "Name": "ABC Construction",
-        "Email": "contact@abc.com",
-        "Balance": 2450.75
-      }
+      { "Id": "CUST001", "Name": "ABC Construction", "Email": "contact@abc.com", "Balance": 2450.75 }
     ]
   }'
 ```
 
-### 2. Workers Upserts to D1
+### 2. Workers upserts into D1
 ```sql
 INSERT INTO customers (...)
 VALUES (...)
-ON CONFLICT(tenant_id, company_id, sage_id) 
+ON CONFLICT(tenant_id, company_id, sage_id)
 DO UPDATE SET ...
 ```
 
-### 3. Mobile App Pulls Data
+### 3. App reads data
 ```javascript
 fetch('https://api.sagebridge.workers.dev/api/customers', {
-  headers: { 'X-API-Key': 'demo-key' }
+  headers: { Authorization: `Bearer ${firebaseIdToken}`, 'X-Company-Id': companyId }
 })
 ```
 
@@ -238,19 +245,13 @@ fetch('https://api.sagebridge.workers.dev/api/customers', {
 
 ## 🌍 Deploy to Production
 
-### 1. Set Custom Domain (Optional)
+### 1. Set a custom domain (optional)
 ```bash
 # Add route in Cloudflare dashboard:
 # api.sagebridge.io → sagebridge-api worker
 ```
 
-### 2. Set Secrets
-```bash
-npx wrangler secret put MASTER_API_KEY
-# Enter: your-super-secret-key-here
-```
-
-### 3. Deploy
+### 2. Deploy
 ```bash
 npm run deploy
 ```
@@ -266,8 +267,6 @@ npm run deploy
 | D1 Reads | 5M/day | ✅ High traffic OK |
 | D1 Writes | 100K/day | ✅ Frequent syncs OK |
 
-**Estimated cost for 10,000 companies: $0-25/month** (well within free tier for most usage)
-
 ---
 
 ## 🛠️ Development
@@ -280,10 +279,7 @@ npm run dev
 
 ### Test Against Local D1
 ```bash
-# Wrangler dev uses a local SQLite DB automatically
 npm run dev
-
-# Query local DB
 npx wrangler d1 execute sagebridge-db --local --command="SELECT * FROM customers"
 ```
 
@@ -294,70 +290,18 @@ npm run tail
 
 ---
 
-## 🔧 Configuration
-
-### wrangler.toml
-```toml
-name = "sagebridge-api"
-main = "src/index.ts"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "sagebridge-db"
-database_id = "YOUR_DB_ID"
-```
-
-### Environment Variables
-Set in Cloudflare dashboard or via `wrangler secret`:
-- `MASTER_API_KEY` - Admin API key
-
----
-
-## 📝 Next Steps
-
-1. ✅ **Test locally** - `npm run dev`
-2. ✅ **Create D1 database** - `wrangler d1 create`
-3. ✅ **Deploy** - `npm run deploy`
-4. ⏳ **Update mobile app** - Point to your Workers URL
-5. ⏳ **Update connector** - Set CloudflareWorkerUrl in config.json
-6. ⏳ **Add custom domain** - api.yourdomain.com
-7. ⏳ **Production auth** - Implement real API key hashing
-
----
-
-## 🎯 Integration Points
-
-### Mobile App (Next.js)
-```typescript
-const API_URL = 'https://api.sagebridge.workers.dev';
-const API_KEY = 'demo-key';
-
-fetch(`${API_URL}/api/customers`, {
-  headers: { 'X-API-Key': API_KEY }
-});
-```
-
-### Windows Connector (C#)
-```csharp
-_httpClient.BaseAddress = new Uri("https://api.sagebridge.workers.dev");
-_httpClient.DefaultRequestHeaders.Add("X-API-Key", apiKey);
-
-await _httpClient.PostAsync("/sync/customers", content);
-```
-
----
-
 ## 🚨 Security Checklist
 
-- [x] CORS configured
-- [x] API key authentication
-- [x] Tenant isolation in queries
-- [ ] API key hashing (TODO for production)
-- [ ] Rate limiting (TODO)
-- [ ] Request validation (TODO)
+- [x] CORS restricted to an explicit `FRONTEND_ORIGINS` allowlist
+- [x] Firebase ID token verification (signature, issuer, audience, expiry, `email_verified`)
+- [x] Per-connector hashed credentials, independently revocable
+- [x] Tenant/company isolation enforced on every query from the authenticated caller's own scope
+- [x] Idempotency keys bound to a payload fingerprint (replay with a different payload is rejected)
+- [x] Rate limiting on pairing code creation and exchange
+- [x] Bounded JSON request bodies
+- [ ] Structured audit log review / alerting (audit_events table exists; no alerting yet)
+- [ ] Automated key rotation for connector credentials
 
 ---
 
 **Built for SageBridge - Your Sage 50, Everywhere 🌉**
-
-Deploy to Cloudflare's edge network and your API is live globally in seconds! 🚀

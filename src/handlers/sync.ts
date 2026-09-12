@@ -100,10 +100,8 @@ export async function handleSyncCustomers(request: Request, env: Env, tenantId: 
       total: Customers.length
     }, errors > 0 ? 207 : 200);
   } catch (error) {
-    return jsonResponse({
-      error: 'Sync failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Customer sync failed:', error);
+    return jsonResponse({ error: 'Sync failed' }, 500);
   }
 }
 
@@ -164,10 +162,8 @@ export async function handleSyncInvoices(request: Request, env: Env, tenantId: s
 
     return jsonResponse({ success: errors === 0, synced, errors, total: Invoices.length }, errors > 0 ? 207 : 200);
   } catch (error) {
-    return jsonResponse({
-      error: 'Sync failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Invoice sync failed:', error);
+    return jsonResponse({ error: 'Sync failed' }, 500);
   }
 }
 
@@ -210,10 +206,10 @@ export async function handleSyncProducts(request: Request, env: Env, tenantId: s
           product.SKU,
           product.Name,
           product.Price || 0,
-          product.Stock || null,
-          product.ReorderLevel || null,
+          typeof product.Stock === 'number' ? product.Stock : null,
+          typeof product.ReorderLevel === 'number' ? product.ReorderLevel : null,
           product.Category || null,
-          product.Stock === null ? 1 : 0
+          product.Stock == null ? 1 : 0
         ).run();
         
         synced++;
@@ -230,10 +226,8 @@ export async function handleSyncProducts(request: Request, env: Env, tenantId: s
 
     return jsonResponse({ success: errors === 0, synced, errors, total: Products.length }, errors > 0 ? 207 : 200);
   } catch (error) {
-    return jsonResponse({
-      error: 'Sync failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Product sync failed:', error);
+    return jsonResponse({ error: 'Sync failed' }, 500);
   }
 }
 
@@ -251,7 +245,7 @@ export async function handleSyncQuotes(request: Request, env: Env, tenantId: str
     }
     await recordSync(env,tenantId,companyId,connectorId,'quotes',synced);
     return jsonResponse({success:true,synced,total:body.Quotes.length});
-  } catch(error) { return jsonResponse({error:'Sync failed',message:error instanceof Error?error.message:'Unknown error'},500); }
+  } catch(error) { console.error('Quote sync failed:', error); return jsonResponse({error:'Sync failed'},500); }
 }
 
 export async function handleSyncInvoiceSummary(request: Request, env: Env, tenantId: string, companyId: string, connectorId: string): Promise<Response> {
@@ -263,5 +257,5 @@ export async function handleSyncInvoiceSummary(request: Request, env: Env, tenan
     await env.DB.prepare(`INSERT INTO invoice_summaries(tenant_id,company_id,payload_json,last_synced_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id,company_id) DO UPDATE SET payload_json=excluded.payload_json,last_synced_at=CURRENT_TIMESTAMP`).bind(tenantId,companyId,JSON.stringify(summary)).run();
     await recordSync(env,tenantId,companyId,connectorId,'invoice-summary',1);
     return jsonResponse({success:true,synced:1});
-  } catch(error) { return jsonResponse({error:'Sync failed',message:error instanceof Error?error.message:'Unknown error'},500); }
+  } catch(error) { console.error('Invoice summary sync failed:', error); return jsonResponse({error:'Sync failed'},500); }
 }

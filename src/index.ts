@@ -6,8 +6,6 @@ export interface Env {
   DB: D1Database;
   FIREBASE_PROJECT_ID: string;
   FRONTEND_ORIGINS?: string;
-  /** Temporary adapter switch. Legacy connector authentication remains disabled unless exactly "true". */
-  ENABLE_LEGACY_CONNECTOR_API_KEY?: string;
   ENVIRONMENT?: string;
 }
 

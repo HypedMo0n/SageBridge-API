@@ -55,7 +55,8 @@ export async function handleGetJob(
       startedAt: job.startedAt,
       completedAt: job.completedAt
     });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch job:', error);
+    return jsonResponse({ error: 'Failed to fetch job' }, 500);
   }
 }

@@ -30,10 +30,8 @@ export async function handleGetInvoices(
       count: results.length
     });
   } catch (error) {
-    return jsonResponse({
-      error: 'Failed to fetch invoices',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Failed to fetch invoices:', error);
+    return jsonResponse({ error: 'Failed to fetch invoices' }, 500);
   }
 }
 
@@ -63,9 +61,7 @@ export async function handleGetInvoice(
 
     return jsonResponse({ invoice });
   } catch (error) {
-    return jsonResponse({
-      error: 'Failed to fetch invoice',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Failed to fetch invoice:', error);
+    return jsonResponse({ error: 'Failed to fetch invoice' }, 500);
   }
 }

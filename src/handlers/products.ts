@@ -33,9 +33,7 @@ export async function handleGetProducts(
       count: results.length
     });
   } catch (error) {
-    return jsonResponse({
-      error: 'Failed to fetch products',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Failed to fetch products:', error);
+    return jsonResponse({ error: 'Failed to fetch products' }, 500);
   }
 }

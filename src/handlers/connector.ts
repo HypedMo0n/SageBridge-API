@@ -35,8 +35,9 @@ export async function handleGetConnectorJobs(
     }));
 
     return jsonResponse({ jobs });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch connector jobs:', error);
+    return jsonResponse({ error: 'Failed to fetch jobs' }, 500);
   }
 }
 
@@ -77,8 +78,9 @@ export async function handleStartJob(
     }
 
     return jsonResponse({ success: true, status: 'running' });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to start job:', error);
+    return jsonResponse({ error: 'Failed to start job' }, 500);
   }
 }
 
@@ -191,8 +193,9 @@ export async function handleJobResult(
     }
 
     return jsonResponse({ success: true, existing: false });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to submit job result:', error);
+    return jsonResponse({ error: 'Failed to submit job result' }, 500);
   }
 }
 
@@ -300,7 +303,8 @@ export async function handleGetJobStatus(
       startedAt: job.started_at,
       completedAt: job.completed_at
     });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch job status:', error);
+    return jsonResponse({ error: 'Failed to fetch job status' }, 500);
   }
 }

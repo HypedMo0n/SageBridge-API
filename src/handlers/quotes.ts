@@ -58,7 +58,8 @@ export async function handleCreateQuote(
     }
 
     return jsonResponse({ jobId, status: 'pending', message: 'Quote creation job queued' }, 201);
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to create quote job:', error);
+    return jsonResponse({ error: 'Failed to create quote' }, 500);
   }
 }
