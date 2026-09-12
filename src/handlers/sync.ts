@@ -34,6 +34,8 @@ export async function handleSyncCustomers(request: Request, env: Env, tenantId: 
     let synced = 0;
     let errors = 0;
     const snapshotToken = new Date().toISOString();
+    const existingCustomerIds = new Set((await env.DB.prepare(`SELECT sage_id FROM customers WHERE tenant_id=? AND company_id=?`).bind(tenantId,companyId).all()).results.map((row:any)=>String(row.sage_id)));
+    const incomingCustomerIds = new Set(Customers.map((customer:any)=>String(customer?.Id)));
 
     // Upsert each customer
     for (const customer of Customers) {
@@ -49,6 +51,11 @@ export async function handleSyncCustomers(request: Request, env: Env, tenantId: 
             balance = excluded.balance,
             status = excluded.status,
             last_synced_at = excluded.last_synced_at
+          WHERE customers.name IS NOT excluded.name
+             OR customers.email IS NOT excluded.email
+             OR customers.phone IS NOT excluded.phone
+             OR customers.balance IS NOT excluded.balance
+             OR customers.status IS NOT excluded.status
         `).bind(
           tenantId,
           companyId,
@@ -68,15 +75,15 @@ export async function handleSyncCustomers(request: Request, env: Env, tenantId: 
       }
     }
 
-    // The connector sends a complete Sage customer snapshot. Remove cloud
-    // records absent from that snapshot only when every upsert succeeded.
+    // The connector sends a complete Sage customer snapshot. Compare IDs
+    // separately so unchanged rows do not need a timestamp write to survive.
     let deleted = 0;
     if (errors === 0) {
-      const deletionResult = await env.DB.prepare(`
-        DELETE FROM customers
-        WHERE tenant_id = ? AND company_id = ? AND last_synced_at <> ?
-      `).bind(tenantId, companyId, snapshotToken).run();
-      deleted = deletionResult.meta.changes || 0;
+      const absent=[...existingCustomerIds].filter(id=>!incomingCustomerIds.has(id));
+      if(absent.length) {
+        const results=await env.DB.batch(absent.map(id=>env.DB.prepare(`DELETE FROM customers WHERE tenant_id=? AND company_id=? AND sage_id=?`).bind(tenantId,companyId,id)));
+        deleted=results.reduce((total,result)=>total+(result.meta.changes||0),0);
+      }
     }
 
     // Log sync event
@@ -137,6 +144,12 @@ export async function handleSyncInvoices(request: Request, env: Env, tenantId: s
             balance = excluded.balance,
             status = excluded.status,
             last_synced_at = CURRENT_TIMESTAMP
+          WHERE invoices.customer_sage_id IS NOT excluded.customer_sage_id
+             OR invoices.invoice_number IS NOT excluded.invoice_number
+             OR invoices.date IS NOT excluded.date
+             OR invoices.total IS NOT excluded.total
+             OR invoices.balance IS NOT excluded.balance
+             OR invoices.status IS NOT excluded.status
         `).bind(
           tenantId,
           companyId,
@@ -201,6 +214,13 @@ export async function handleSyncProducts(request: Request, env: Env, tenantId: s
             category = excluded.category,
             is_service = excluded.is_service,
             last_synced_at = CURRENT_TIMESTAMP
+          WHERE products.sku IS NOT excluded.sku
+             OR products.name IS NOT excluded.name
+             OR products.price IS NOT excluded.price
+             OR products.stock IS NOT excluded.stock
+             OR products.reorder_level IS NOT excluded.reorder_level
+             OR products.category IS NOT excluded.category
+             OR products.is_service IS NOT excluded.is_service
         `).bind(
           tenantId,
           companyId,
@@ -242,7 +262,7 @@ export async function handleSyncQuotes(request: Request, env: Env, tenantId: str
     let synced=0;
     for(const quote of body.Quotes) {
       const sageId=quote?.Id??quote?.SageId??quote?.QuoteNumber;
-      await env.DB.prepare(`INSERT INTO quotes(tenant_id,company_id,sage_id,payload_json,last_synced_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id,company_id,sage_id) DO UPDATE SET payload_json=excluded.payload_json,last_synced_at=CURRENT_TIMESTAMP`).bind(tenantId,companyId,sageId,JSON.stringify(quote)).run();
+      await env.DB.prepare(`INSERT INTO quotes(tenant_id,company_id,sage_id,payload_json,last_synced_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id,company_id,sage_id) DO UPDATE SET payload_json=excluded.payload_json,last_synced_at=CURRENT_TIMESTAMP WHERE quotes.payload_json IS NOT excluded.payload_json`).bind(tenantId,companyId,sageId,JSON.stringify(quote)).run();
       synced++;
     }
     await recordSync(env,tenantId,companyId,connectorId,'quotes',synced);
@@ -256,7 +276,7 @@ export async function handleSyncInvoiceSummary(request: Request, env: Env, tenan
     const conflict=conflictingCompany(body,companyId); if(conflict)return conflict;
     const summary=body.InvoiceSummary??body.invoiceSummary;
     if(!summary||typeof summary!=='object'||Array.isArray(summary)) return jsonResponse({error:'InvoiceSummary object is required'},400);
-    await env.DB.prepare(`INSERT INTO invoice_summaries(tenant_id,company_id,payload_json,last_synced_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id,company_id) DO UPDATE SET payload_json=excluded.payload_json,last_synced_at=CURRENT_TIMESTAMP`).bind(tenantId,companyId,JSON.stringify(summary)).run();
+    await env.DB.prepare(`INSERT INTO invoice_summaries(tenant_id,company_id,payload_json,last_synced_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id,company_id) DO UPDATE SET payload_json=excluded.payload_json,last_synced_at=CURRENT_TIMESTAMP WHERE invoice_summaries.payload_json IS NOT excluded.payload_json`).bind(tenantId,companyId,JSON.stringify(summary)).run();
     await recordSync(env,tenantId,companyId,connectorId,'invoice-summary',1);
     return jsonResponse({success:true,synced:1});
   } catch(error) { console.error('Invoice summary sync failed:', error); return jsonResponse({error:'Sync failed'},500); }
