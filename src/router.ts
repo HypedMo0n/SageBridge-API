@@ -4,7 +4,7 @@ import { HttpError } from './security/security';
 import { requireCompanyAccess, requireConnector, requireUser } from './security/access';
 import { handleHealth } from './handlers/health';
 import { handleGetCustomers,handleGetCustomer,handleCreateCustomer } from './handlers/customers';
-import { handleGetInvoices,handleGetInvoice } from './handlers/invoices';
+import { handleGetInvoices,handleGetInvoice,handleCreateInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
 import { handleCreateQuote } from './handlers/quotes';
 import { handleSyncCustomers,handleSyncInvoices,handleSyncProducts,handleSyncQuotes,handleSyncInvoiceSummary } from './handlers/sync';
@@ -63,6 +63,7 @@ async function routeRequest(request:Request,env:Env):Promise<Response>{
     if(path==='/api/invoices'&&method==='GET') return handleGetInvoices(org,company,env);
     id=capture(path,/^\/api\/invoices\/([\w-]+)$/);
     if(id&&method==='GET') return handleGetInvoice(org,company,id,env);
+    if(path==='/api/invoices'&&method==='POST') return handleCreateInvoice(org,company,request,env);
     if(path==='/api/products'&&method==='GET') return handleGetProducts(org,company,env);
     if(path==='/api/quotes'&&method==='POST') return handleCreateQuote(org,company,request,env);
     id=capture(path,/^\/api\/jobs\/([\w-]+)$/);

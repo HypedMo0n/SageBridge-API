@@ -39,6 +39,7 @@ async function database() {
   await db.exec(sql('migrations/0002_job_idempotency_hardening.sql'));
   await db.exec(sql('migrations/0003_external_beta_phase1.sql'));
   await db.exec(sql('migrations/0004_pairing_claim_hardening.sql'));
+  await db.exec(sql('migrations/0005_invoice_create.sql'));
   return {mf,env:{DB:db,FIREBASE_PROJECT_ID:project,FRONTEND_ORIGINS:'https://app.example.com'} as any};
 }
 
@@ -161,6 +162,46 @@ test('routes enforce tenant isolation, pairing lifecycle, connector scope, provi
     assert.equal((await env.DB.prepare(`SELECT state FROM provisioning WHERE company_id=?`).bind(companyA).first<any>()).state,'ready');
     assert.equal((await json(await handleRequest(request(`/connectors/${replacement.body.connectorId}/revoke`,'POST',tokenA),env))).status,200);
     assert.equal((await env.DB.prepare(`SELECT connector_status FROM companies WHERE id=?`).bind(companyA).first<any>()).connector_status,'awaiting_connector');
+  } finally {await mf.dispose()}
+});
+
+test('invoice.create is queued, claimed, and resolved idempotently like quote.create',async()=>{
+  const {mf,env}=await database();
+  try {
+    const token=jwt('invoice-user');
+    const boot=await json(await handleRequest(request('/auth/bootstrap','POST',token),env));
+    const company=boot.body.companies[0].id;
+    const pairing=await json(await handleRequest(request(`/api/companies/${company}/pairing-codes`,'POST',token,{}),env));
+    const exchange=await json(await handleRequest(request('/connector/pairing/validate','POST',undefined,{pairingCode:pairing.body.code,connectorVersion:'0.1.0-beta',machineName:'INVOICE-DESKTOP'}),env));
+    const connectorId=exchange.body.connectorId, credential=exchange.body.credential;
+
+    const rejectedByCheck=await env.DB.prepare(`INSERT INTO connector_jobs(id,tenant_id,company_id,request_id,action,payload) VALUES ('bad-action','x','y','z','not.a.real.action','{}')`).run().catch((e:Error)=>e);
+    assert.ok(rejectedByCheck instanceof Error, 'the widened CHECK constraint should still reject unknown actions');
+
+    const invoice=await json(await handleRequest(request('/api/invoices','POST',token,{idempotencyKey:'invoice-1',invoice:{customerId:'C1',lines:[{sku:'SKU',quantity:2,unitPrice:50}]}},{'x-company-id':company}),env));
+    assert.equal(invoice.status,201);
+    const jobId=invoice.body.jobId;
+
+    const jobs=await json(await handleRequest(connectorRequest('/connector/jobs','GET',connectorId,credential),env));
+    assert.ok(jobs.body.jobs.some((j:any)=>j.jobId===jobId&&j.action==='invoice.create'));
+
+    assert.equal((await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/start`,'POST',connectorId,credential),env))).status,200);
+
+    // The dangerous case: Sage Post() succeeded (the connector has a real
+    // invoice number) but the first attempt to tell the cloud is lost, then
+    // retried. Resubmitting the identical result must be a no-op, and a
+    // different sageId for the same job must be rejected rather than
+    // silently overwriting the first success.
+    const first=await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',connectorId,credential,{status:'succeeded',sageId:'INV-20260101-001'}),env));
+    assert.equal(first.status,200); assert.equal(first.body.existing,false);
+    const retried=await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',connectorId,credential,{status:'succeeded',sageId:'INV-20260101-001'}),env));
+    assert.equal(retried.status,200); assert.equal(retried.body.existing,true);
+    const conflicting=await json(await handleRequest(connectorRequest(`/connector/jobs/${jobId}/result`,'POST',connectorId,credential,{status:'succeeded',sageId:'INV-20260101-999'}),env));
+    assert.equal(conflicting.status,409);
+
+    const status=await json(await handleRequest(request(`/api/jobs/${jobId}`,'GET',token,undefined,{'x-company-id':company}),env));
+    assert.equal(status.body.status,'succeeded');
+    assert.deepEqual(status.body.resource,{type:'invoice',id:'INV-20260101-001'});
   } finally {await mf.dispose()}
 });
 
