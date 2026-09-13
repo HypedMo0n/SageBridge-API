@@ -349,5 +349,3 @@ test('CORS reflects configured origins only and rejects disallowed preflight',as
     assert.equal(denied.status,403); assert.equal(denied.headers.get('access-control-allow-origin'),null);
   } finally {await mf.dispose()}
 });
-
-
