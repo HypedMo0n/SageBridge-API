@@ -13,9 +13,9 @@ export async function handleGetProducts(
   try {
     const { results } = await env.DB.prepare(`
       SELECT 
-        id, sage_id as sageId, sku, name, description,
+        id, sage_id as sageId, sku, name, description, unit,
         price, stock, reorder_level as reorderLevel,
-        category, is_service as isService,
+        category, is_service as isService, status,
         last_synced_at as lastSyncedAt
       FROM products
       WHERE tenant_id = ? AND company_id = ?

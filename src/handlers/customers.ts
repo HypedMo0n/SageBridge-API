@@ -14,9 +14,12 @@ export async function handleGetCustomers(
   try {
     const { results } = await env.DB.prepare(`
       SELECT 
-        id, sage_id as sageId, name, email, phone, balance, status,
-        address, city, province, postal_code as postalCode,
-        last_synced_at as lastSyncedAt
+            id, sage_id as sageId, name, contact, email, phone,
+            alternate_phone as alternatePhone, fax, balance,
+            home_currency_balance as homeCurrencyBalance,
+            credit_limit as creditLimit, status,
+            address, city, province, postal_code as postalCode,
+            last_synced_at as lastSyncedAt
       FROM customers
       WHERE tenant_id = ? AND company_id = ?
       ORDER BY name ASC
@@ -41,7 +44,13 @@ export async function handleGetCustomer(
 ): Promise<Response> {
   try {
     const customer = await env.DB.prepare(`
-      SELECT * FROM customers
+      SELECT
+        id, sage_id as sageId, name, contact, email, phone,
+        alternate_phone as alternatePhone, fax, credit_limit as creditLimit,
+        balance, home_currency_balance as homeCurrencyBalance, status,
+        address, city, province, postal_code as postalCode,
+        last_synced_at as lastSyncedAt
+      FROM customers
       WHERE tenant_id = ? AND company_id = ? AND (id = ? OR sage_id = ?)
     `).bind(tenantId, companyId, id, id).first();
 

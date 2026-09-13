@@ -14,7 +14,12 @@ export async function handleGetInvoices(
     const { results } = await env.DB.prepare(`
       SELECT 
         i.id, i.sage_id as sageId, i.invoice_number as invoiceNumber,
-        i.date, i.due_date as dueDate, i.total, i.balance, i.status,
+        i.date, i.reference, i.pre_tax_total as preTaxTotal,
+        i.total, i.balance,
+        i.home_currency_total as homeCurrencyTotal,
+        i.home_currency_balance as homeCurrencyBalance,
+        i.transaction_currency_total as transactionCurrencyTotal,
+        i.transaction_currency_balance as transactionCurrencyBalance,
         i.customer_sage_id as customerSageId,
         c.name as customerName
       FROM invoices i
@@ -47,7 +52,12 @@ export async function handleGetInvoice(
     const invoice = await env.DB.prepare(`
       SELECT 
         i.id, i.sage_id as sageId, i.invoice_number as invoiceNumber,
-        i.date, i.due_date as dueDate, i.total, i.balance, i.status,
+        i.date, i.reference, i.pre_tax_total as preTaxTotal,
+        i.total, i.balance,
+        i.home_currency_total as homeCurrencyTotal,
+        i.home_currency_balance as homeCurrencyBalance,
+        i.transaction_currency_total as transactionCurrencyTotal,
+        i.transaction_currency_balance as transactionCurrencyBalance,
         i.description, i.customer_sage_id as customerSageId,
         c.name as customerName, c.email as customerEmail, c.phone as customerPhone
       FROM invoices i

@@ -76,9 +76,14 @@ CREATE TABLE IF NOT EXISTS customers (
     sage_id TEXT NOT NULL,
     name TEXT NOT NULL,
     email TEXT,
+    contact TEXT,
     phone TEXT,
-    balance REAL DEFAULT 0,
-    status TEXT DEFAULT 'Active',
+    alternate_phone TEXT,
+    fax TEXT,
+    credit_limit REAL,
+    balance REAL,
+    home_currency_balance REAL,
+    status TEXT,
     address TEXT,
     city TEXT,
     province TEXT,
@@ -107,11 +112,15 @@ CREATE TABLE IF NOT EXISTS invoices (
     customer_id INTEGER,
     customer_sage_id TEXT,
     invoice_number TEXT NOT NULL,
+    reference TEXT,
     date DATE NOT NULL,
-    due_date DATE,
-    total REAL DEFAULT 0,
-    balance REAL DEFAULT 0,
-    status TEXT DEFAULT 'Unpaid',
+    pre_tax_total REAL,
+    total REAL,
+    balance REAL,
+    home_currency_total REAL,
+    home_currency_balance REAL,
+    transaction_currency_total REAL,
+    transaction_currency_balance REAL,
     description TEXT,
     last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -124,7 +133,6 @@ CREATE TABLE IF NOT EXISTS invoices (
 
 CREATE INDEX idx_invoices_tenant_company ON invoices(tenant_id, company_id);
 CREATE INDEX idx_invoices_customer ON invoices(customer_id);
-CREATE INDEX idx_invoices_status ON invoices(status);
 CREATE INDEX idx_invoices_date ON invoices(date);
 
 -- ┌─────────────────────────────────────────────────────────┐
@@ -139,11 +147,13 @@ CREATE TABLE IF NOT EXISTS products (
     sku TEXT NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
-    price REAL DEFAULT 0,
+    unit TEXT,
+    price REAL,
     stock INTEGER,
     reorder_level INTEGER,
     category TEXT,
-    is_service BOOLEAN DEFAULT 0,
+    is_service BOOLEAN,
+    status TEXT,
     last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -226,14 +236,14 @@ VALUES
   ('demo-tenant', 'demo-company', 'CUST001', 'ABC Construction', 'contact@abc-const.ca', '604-555-0101', 2450.75, 'Active'),
   ('demo-tenant', 'demo-company', 'CUST002', 'XYZ Renovations', 'info@xyz-reno.ca', '604-555-0102', 0, 'Active'),
   ('demo-tenant', 'demo-company', 'CUST003', 'Northern Builders', 'admin@northernbuilders.ca', '604-555-0103', 8750.25, 'Active'),
-  ('demo-tenant', 'demo-company', 'CUST004', 'West Coast Contracting', 'hello@westcoast.ca', '604-555-0104', -340.00, 'Overdue');
+  ('demo-tenant', 'demo-company', 'CUST004', 'West Coast Contracting', 'hello@westcoast.ca', '604-555-0104', -340.00, 'Active');
 
 -- Demo invoices
-INSERT OR IGNORE INTO invoices (tenant_id, company_id, sage_id, customer_sage_id, invoice_number, date, total, balance, status) 
-VALUES 
-  ('demo-tenant', 'demo-company', 'INV001', 'CUST001', 'INV-1001', '2026-09-01', 2450.75, 2450.75, 'Unpaid'),
-  ('demo-tenant', 'demo-company', 'INV002', 'CUST003', 'INV-1002', '2026-09-05', 8750.25, 8750.25, 'Unpaid'),
-  ('demo-tenant', 'demo-company', 'INV003', 'CUST002', 'INV-1003', '2026-08-28', 1200.00, 0, 'Paid');
+INSERT OR IGNORE INTO invoices (tenant_id, company_id, sage_id, customer_sage_id, invoice_number, date, total, balance)
+VALUES
+  ('demo-tenant', 'demo-company', 'INV001', 'CUST001', 'INV-1001', '2026-09-01', 2450.75, 2450.75),
+  ('demo-tenant', 'demo-company', 'INV002', 'CUST003', 'INV-1002', '2026-09-05', 8750.25, 8750.25),
+  ('demo-tenant', 'demo-company', 'INV003', 'CUST002', 'INV-1003', '2026-08-28', 1200.00, 0);
 
 -- Demo products
 INSERT OR IGNORE INTO products (tenant_id, company_id, sage_id, sku, name, price, stock, reorder_level, category, is_service) 

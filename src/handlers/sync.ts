@@ -23,13 +23,21 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
       try {
         await env.DB.prepare(`
           INSERT INTO customers (
-            tenant_id, company_id, sage_id, name, email, phone, balance, status, last_synced_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            tenant_id, company_id, sage_id, name, contact, email, phone,
+            alternate_phone, fax, address, credit_limit, balance,
+            home_currency_balance, status, last_synced_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(tenant_id, company_id, sage_id) DO UPDATE SET
             name = excluded.name,
+            contact = excluded.contact,
             email = excluded.email,
             phone = excluded.phone,
+            alternate_phone = excluded.alternate_phone,
+            fax = excluded.fax,
+            address = excluded.address,
+            credit_limit = excluded.credit_limit,
             balance = excluded.balance,
+            home_currency_balance = excluded.home_currency_balance,
             status = excluded.status,
             last_synced_at = excluded.last_synced_at
         `).bind(
@@ -37,10 +45,16 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
           CompanyId,
           customer.Id,
           customer.Name,
-          customer.Email || null,
-          customer.Phone || null,
-          customer.Balance || 0,
-          customer.Status || 'Active',
+          customer.Contact ?? null,
+          customer.Email ?? null,
+          customer.Phone ?? null,
+          customer.AlternatePhone ?? null,
+          customer.Fax ?? null,
+          customer.Address ?? null,
+          customer.CreditLimit ?? null,
+          customer.Balance ?? null,
+          customer.HomeCurrencyBalance ?? null,
+          customer.Status ?? null,
           snapshotToken
         ).run();
         
@@ -105,15 +119,24 @@ export async function handleSyncInvoices(request: Request, env: Env): Promise<Re
         await env.DB.prepare(`
           INSERT INTO invoices (
             tenant_id, company_id, sage_id, customer_sage_id, invoice_number,
-            date, total, balance, status, last_synced_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            reference, date, pre_tax_total, total, balance,
+            home_currency_total, home_currency_balance,
+            transaction_currency_total, transaction_currency_balance,
+            description, last_synced_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(tenant_id, company_id, sage_id) DO UPDATE SET
             customer_sage_id = excluded.customer_sage_id,
             invoice_number = excluded.invoice_number,
+            reference = excluded.reference,
             date = excluded.date,
+            pre_tax_total = excluded.pre_tax_total,
             total = excluded.total,
             balance = excluded.balance,
-            status = excluded.status,
+            home_currency_total = excluded.home_currency_total,
+            home_currency_balance = excluded.home_currency_balance,
+            transaction_currency_total = excluded.transaction_currency_total,
+            transaction_currency_balance = excluded.transaction_currency_balance,
+            description = excluded.description,
             last_synced_at = CURRENT_TIMESTAMP
         `).bind(
           TenantId,
@@ -121,10 +144,16 @@ export async function handleSyncInvoices(request: Request, env: Env): Promise<Re
           invoice.Id,
           invoice.CustomerId || null,
           invoice.InvoiceNumber,
+          invoice.Reference || null,
           invoice.Date,
-          invoice.Total || 0,
-          invoice.Balance || 0,
-          invoice.Status || 'Unpaid'
+          invoice.PreTaxTotal ?? null,
+          invoice.Total ?? null,
+          invoice.Balance ?? null,
+          invoice.HomeCurrencyTotal ?? null,
+          invoice.HomeCurrencyBalance ?? null,
+          invoice.TransactionCurrencyTotal ?? null,
+          invoice.TransactionCurrencyBalance ?? null,
+          invoice.Description ?? null
         ).run();
         
         synced++;
@@ -162,17 +191,20 @@ export async function handleSyncProducts(request: Request, env: Env): Promise<Re
       try {
         await env.DB.prepare(`
           INSERT INTO products (
-            tenant_id, company_id, sage_id, sku, name, price,
-            stock, reorder_level, category, is_service, last_synced_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            tenant_id, company_id, sage_id, sku, name, description, unit, price,
+            stock, reorder_level, category, is_service, status, last_synced_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(tenant_id, company_id, sage_id) DO UPDATE SET
             sku = excluded.sku,
             name = excluded.name,
+            description = excluded.description,
+            unit = excluded.unit,
             price = excluded.price,
             stock = excluded.stock,
             reorder_level = excluded.reorder_level,
             category = excluded.category,
             is_service = excluded.is_service,
+            status = excluded.status,
             last_synced_at = CURRENT_TIMESTAMP
         `).bind(
           TenantId,
@@ -180,11 +212,14 @@ export async function handleSyncProducts(request: Request, env: Env): Promise<Re
           product.Id,
           product.SKU,
           product.Name,
-          product.Price || 0,
-          product.Stock || null,
-          product.ReorderLevel || null,
-          product.Category || null,
-          product.Stock === null ? 1 : 0
+          product.Description ?? null,
+          product.Unit ?? null,
+          product.Price ?? null,
+          product.Stock ?? null,
+          product.ReorderLevel ?? null,
+          product.Category ?? null,
+          product.IsService ?? null,
+          product.Status ?? null
         ).run();
         
         synced++;
