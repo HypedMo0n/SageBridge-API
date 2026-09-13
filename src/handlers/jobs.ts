@@ -47,7 +47,7 @@ export async function handleGetJob(
     // Clean response for frontend
     return jsonResponse({
       jobId: job.id,
-      status: job.status, // pending | processing | succeeded | failed
+      status: job.status, // pending | claimed | running | succeeded | failed
       action: job.action,
       resource, // { type: 'customer', id: 'sage_123' }
       error: job.error,
@@ -55,7 +55,8 @@ export async function handleGetJob(
       startedAt: job.startedAt,
       completedAt: job.completedAt
     });
-  } catch (error: any) {
-    return jsonResponse({ error: error.message }, 500);
+  } catch (error) {
+    console.error('Failed to fetch job:', error);
+    return jsonResponse({ error: 'Failed to fetch job' }, 500);
   }
 }
