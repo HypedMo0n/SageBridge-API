@@ -116,8 +116,8 @@ export async function exchangePairing(request: Request, env: Env, ip: string) {
 
 export async function listConnectors(user: UserContext, company: string, env: Env) {
   const access=await requireCompanyAccess(user.userId,company,env);
-  const rows=(await env.DB.prepare(`SELECT id,display_name,version,status,last_seen_at,created_at,revoked_at FROM connectors WHERE company_id=? AND organization_id=? ORDER BY created_at`).bind(company,access.organization_id).all()).results;
-  return jsonResponse({connectors:rows.map((x:any)=>({id:x.id,displayName:x.display_name,version:x.version,status:x.status,lastSeenAt:x.last_seen_at,createdAt:x.created_at,revokedAt:x.revoked_at,online:x.status==='active'&&!connectorIsStale(x.last_seen_at)}))});
+  const rows=(await env.DB.prepare(`SELECT id,display_name,machine_name,version,status,last_seen_at,last_sync_at,created_at,revoked_at FROM connectors WHERE company_id=? AND organization_id=? ORDER BY created_at`).bind(company,access.organization_id).all()).results;
+  return jsonResponse({connectors:rows.map((x:any)=>({id:x.id,displayName:x.display_name,machineName:x.machine_name,version:x.version,status:x.status,lastSeenAt:x.last_seen_at,lastSyncAt:x.last_sync_at,createdAt:x.created_at,revokedAt:x.revoked_at,online:x.status==='active'&&!connectorIsStale(x.last_seen_at)}))});
 }
 
 export async function heartbeat(request: Request,c: ConnectorContext,env: Env) {
