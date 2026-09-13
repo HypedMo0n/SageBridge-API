@@ -10,7 +10,7 @@ import { jsonResponse } from './utils/response';
 // Import handlers
 import { handleHealth } from './handlers/health';
 import { handleGetCustomers, handleGetCustomer, handleCreateCustomer } from './handlers/customers';
-import { handleGetInvoices, handleGetInvoice } from './handlers/invoices';
+import { handleGetInvoices, handleGetInvoice, handleCreateInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
 import { handleCreateQuote } from './handlers/quotes';
 import { handleSyncCustomers, handleSyncInvoices, handleSyncProducts } from './handlers/sync';
@@ -56,6 +56,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === '/api/invoices' && method === 'GET') {
     return handleGetInvoices(tenantId!, companyId!, env);
+  }
+
+  if (path === '/api/invoices' && method === 'POST') {
+    return handleCreateInvoice(tenantId!, companyId!, request, env);
   }
 
   if (path.match(/^\/api\/invoices\/[\w-]+$/) && method === 'GET') {

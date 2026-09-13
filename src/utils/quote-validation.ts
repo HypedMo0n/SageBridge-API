@@ -9,27 +9,38 @@ export interface QuoteInput {
   lines?: unknown;
 }
 
-export function validateQuotePayload(quote: QuoteInput): string | null {
-  if (!quote || typeof quote.customerId !== 'string' || !quote.customerId.trim()) {
-    return 'quote.customerId is required';
+export type InvoiceInput = QuoteInput;
+
+export function validateDocumentPayload(kind: 'quote' | 'invoice', document: QuoteInput): string | null {
+  const prefix = `${kind}.`;
+  if (!document || typeof document.customerId !== 'string' || !document.customerId.trim()) {
+    return `${prefix}customerId is required`;
   }
-  if (!Array.isArray(quote.lines) || quote.lines.length === 0) {
-    return 'quote.lines must contain at least one item';
+  if (!Array.isArray(document.lines) || document.lines.length === 0) {
+    return `${prefix}lines must contain at least one item`;
   }
-  if (quote.lines.length > 100) {
-    return 'quote.lines cannot contain more than 100 items';
+  if (document.lines.length > 100) {
+    return `${prefix}lines cannot contain more than 100 items`;
   }
-  for (let index = 0; index < quote.lines.length; index++) {
-    const line = quote.lines[index] as QuoteLineInput;
+  for (let index = 0; index < document.lines.length; index++) {
+    const line = document.lines[index] as QuoteLineInput;
     if (!line || typeof line.sku !== 'string' || !line.sku.trim()) {
-      return `quote.lines[${index}].sku is required`;
+      return `${prefix}lines[${index}].sku is required`;
     }
     if (typeof line.quantity !== 'number' || !Number.isFinite(line.quantity) || line.quantity <= 0) {
-      return `quote.lines[${index}].quantity must be greater than 0`;
+      return `${prefix}lines[${index}].quantity must be greater than 0`;
     }
     if (typeof line.unitPrice !== 'number' || !Number.isFinite(line.unitPrice) || line.unitPrice < 0) {
-      return `quote.lines[${index}].unitPrice must be 0 or greater`;
+      return `${prefix}lines[${index}].unitPrice must be 0 or greater`;
     }
   }
   return null;
+}
+
+export function validateQuotePayload(quote: QuoteInput): string | null {
+  return validateDocumentPayload('quote', quote);
+}
+
+export function validateInvoicePayload(invoice: InvoiceInput): string | null {
+  return validateDocumentPayload('invoice', invoice);
 }
