@@ -4,7 +4,8 @@ import { HttpError } from './security/security';
 import { requireCompanyAccess, requireConnector, requireUser } from './security/access';
 import { handleHealth } from './handlers/health';
 import { handleGetCustomers,handleGetCustomer,handleCreateCustomer } from './handlers/customers';
-import { handleGetInvoices,handleGetInvoice,handleCreateInvoice } from './handlers/invoices';
+import { handleGetInvoices,handleGetInvoice,handleCreateInvoice,handleGetInvoicePdf } from './handlers/invoices';
+import { getCapabilities,handleEmailInvoice } from './handlers/email';
 import { handleGetProducts } from './handlers/products';
 import { handleCreateQuote,handleGetQuotes } from './handlers/quotes';
 import { handleSyncCustomers,handleSyncInvoices,handleSyncProducts,handleSyncQuotes,handleSyncInvoiceSummary } from './handlers/sync';
@@ -39,6 +40,7 @@ async function routeRequest(request:Request,env:Env):Promise<Response>{
     const user=await requireUser(request,env);
     if(path==='/auth/bootstrap'&&method==='POST') return handleBootstrap(user,env);
     if(path==='/auth/me'&&method==='GET') return handleMe(user,env);
+    if(path==='/api/capabilities'&&method==='GET') return getCapabilities(env);
     if(path==='/api/organizations'&&method==='GET') return handleOrganizations(user,env);
     let id=capture(path,/^\/api\/organizations\/([\w-]+)\/companies$/);
     if(id&&method==='GET') return handleCompanies(user,id,env);
@@ -64,6 +66,10 @@ async function routeRequest(request:Request,env:Env):Promise<Response>{
     id=capture(path,/^\/api\/invoices\/([\w-]+)$/);
     if(id&&method==='GET') return handleGetInvoice(org,company,id,env);
     if(path==='/api/invoices'&&method==='POST') return handleCreateInvoice(org,company,request,env);
+    id=capture(path,/^\/api\/invoices\/([\w-]+)\/pdf$/);
+    if(id&&method==='GET') return handleGetInvoicePdf(org,company,id,env);
+    id=capture(path,/^\/api\/invoices\/([\w-]+)\/email$/);
+    if(id&&method==='POST') return handleEmailInvoice(org,company,id,request,env);
     if(path==='/api/products'&&method==='GET') return handleGetProducts(org,company,env);
     if(path==='/api/quotes'&&method==='GET') return handleGetQuotes(org,company,env);
     if(path==='/api/quotes'&&method==='POST') return handleCreateQuote(org,company,request,env);

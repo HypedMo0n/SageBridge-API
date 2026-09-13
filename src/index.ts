@@ -7,6 +7,10 @@ export interface Env {
   FIREBASE_PROJECT_ID: string;
   FRONTEND_ORIGINS?: string;
   ENVIRONMENT?: string;
+  /** Resend API key (Worker secret). Unset = email capability is disabled. */
+  RESEND_API_KEY?: string;
+  /** Verified "From" address for outgoing invoice emails. */
+  EMAIL_FROM?: string;
 }
 
 export default {

@@ -7,6 +7,43 @@ import { jsonResponse } from '../utils/response';
 import { createJob } from './connector';
 import { InvoiceInput, InvoiceLineInput, validateInvoicePayload } from '../utils/invoice-validation';
 import { parseBoundedJson } from '../security/security';
+import { buildInvoicePdf, InvoiceDetail } from '../utils/pdf';
+
+/**
+ * Shared invoice+customer+company lookup backing the single-invoice GET,
+ * the PDF export, and the email endpoint - one query so all three agree on
+ * exactly what "the invoice" contains, and none of them can drift into
+ * inventing a field the others don't have.
+ *
+ * Matches on either sage_id or invoice_number: the frontend's invoice list
+ * links to /invoices/{invoiceNumber} (e.g. "INV-1001"), which is generally
+ * a different string from the Sage-assigned sage_id, so accepting either
+ * keeps that existing link working instead of 404ing on a param mismatch.
+ */
+export async function fetchInvoiceDetail(
+  tenantId: string,
+  companyId: string,
+  id: string,
+  env: Env
+): Promise<InvoiceDetail | null> {
+  const row = await env.DB.prepare(`
+    SELECT
+      i.id, i.sage_id as sageId, i.invoice_number as invoiceNumber,
+      i.date, i.due_date as dueDate, i.total, i.balance, i.status,
+      i.description, i.customer_sage_id as customerSageId,
+      c.name as customerName, c.email as customerEmail, c.phone as customerPhone,
+      c.address as customerAddress, c.city as customerCity,
+      c.province as customerProvince, c.postal_code as customerPostalCode,
+      co.sage_company_name as companyName
+    FROM invoices i
+    LEFT JOIN customers c ON i.customer_sage_id = c.sage_id
+      AND i.tenant_id = c.tenant_id
+      AND i.company_id = c.company_id
+    LEFT JOIN companies co ON co.id = i.company_id
+    WHERE i.tenant_id = ? AND i.company_id = ? AND (i.sage_id = ? OR i.invoice_number = ?)
+  `).bind(tenantId, companyId, id, id).first<InvoiceDetail>();
+  return row || null;
+}
 
 export async function handleGetInvoices(
   tenantId: string,
@@ -45,27 +82,47 @@ export async function handleGetInvoice(
   env: Env
 ): Promise<Response> {
   try {
-    const invoice = await env.DB.prepare(`
-      SELECT 
-        i.id, i.sage_id as sageId, i.invoice_number as invoiceNumber,
-        i.date, i.due_date as dueDate, i.total, i.balance, i.status,
-        i.description, i.customer_sage_id as customerSageId,
-        c.name as customerName, c.email as customerEmail, c.phone as customerPhone
-      FROM invoices i
-      LEFT JOIN customers c ON i.customer_sage_id = c.sage_id 
-        AND i.tenant_id = c.tenant_id 
-        AND i.company_id = c.company_id
-      WHERE i.tenant_id = ? AND i.company_id = ? AND i.sage_id = ?
-    `).bind(tenantId, companyId, id).first();
-
+    const invoice = await fetchInvoiceDetail(tenantId, companyId, id, env);
     if (!invoice) {
       return jsonResponse({ error: 'Invoice not found' }, 404);
     }
-
     return jsonResponse({ invoice });
   } catch (error) {
     console.error('Failed to fetch invoice:', error);
     return jsonResponse({ error: 'Failed to fetch invoice' }, 500);
+  }
+}
+
+/**
+ * Renders a beta-safe SageBridge PDF for one invoice, from exactly the
+ * fields already synced into D1 - nothing invented. Line items are not
+ * part of the invoice sync payload (see sync.ts handleSyncInvoices), so
+ * they are omitted from the PDF with an explicit note rather than
+ * fabricated, matching the same honesty the invoice detail page already
+ * uses for the same gap.
+ */
+export async function handleGetInvoicePdf(
+  tenantId: string,
+  companyId: string,
+  id: string,
+  env: Env
+): Promise<Response> {
+  try {
+    const invoice = await fetchInvoiceDetail(tenantId, companyId, id, env);
+    if (!invoice) {
+      return jsonResponse({ error: 'Invoice not found' }, 404);
+    }
+    const pdfBytes = await buildInvoicePdf(invoice);
+    return new Response(pdfBytes, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="invoice-${invoice.invoiceNumber || invoice.sageId}.pdf"`
+      }
+    });
+  } catch (error) {
+    console.error('Failed to generate invoice PDF:', error);
+    return jsonResponse({ error: 'Failed to generate invoice PDF' }, 500);
   }
 }
 

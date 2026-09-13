@@ -25,5 +25,8 @@
     "tsx": "^4.23.13",
     "typescript": "^5.4.5",
     "wrangler": "^3.57.0"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
   }
 }
