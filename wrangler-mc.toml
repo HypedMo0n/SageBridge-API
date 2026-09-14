@@ -1,0 +1,14 @@
+name = "sagebridge-api-mc"
+main = "src/index.ts"
+compatibility_date = "2024-05-01"
+
+# Isolated multi-company Beta D1 (feature/multi-company)
+[[d1_databases]]
+binding = "DB"
+database_name = "sagebridge-db-mc"
+database_id = "2216560a-9cf9-4d61-96c0-95d3a4ff914b"
+
+[vars]
+ENVIRONMENT = "beta"
+API_VERSION = "v1"
+RELEASE = "multi-company-beta"
