@@ -41,3 +41,13 @@ export function validateSyncScope(
   }
   return null;
 }
+
+/**
+ * Tenant-scoped routes operate on the tenant, not a single company, so they
+ * must NOT require an X-Company-Id selection. Company registration and listing
+ * are the bootstrap path: a tenant with no companies yet still has to reach
+ * them. Every data route stays company-scoped.
+ */
+export function isTenantScopedRoute(path: string, method: string): boolean {
+  return path === '/api/companies' && (method === 'GET' || method === 'POST');
+}

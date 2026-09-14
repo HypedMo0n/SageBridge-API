@@ -7,7 +7,7 @@
  */
 
 import { Env } from '../index';
-import { validateCompanySelection } from '../security/company-scope';
+import { validateCompanySelection, isTenantScopedRoute } from '../security/company-scope';
 
 export interface AuthResult {
   authenticated: boolean;
@@ -101,6 +101,15 @@ export async function authenticate(request: Request, env: Env): Promise<AuthResu
   }
 
   const requestedCompanyId = request.headers.get('X-Company-Id') || defaultCompanyId;
+
+  // Tenant-scoped routes (company registration/listing) are the bootstrap path:
+  // a tenant with no companies yet must still reach them, so do not require a
+  // resolvable company selection here.
+  const url = new URL(request.url);
+  if (isTenantScopedRoute(url.pathname, request.method)) {
+    return { authenticated: true, tenantId, principal: 'user' };
+  }
+
   const selection = await selectCompany(env, tenantId, requestedCompanyId);
   if (!selection.ok) {
     return { authenticated: false, status: selection.status, error: selection.error };

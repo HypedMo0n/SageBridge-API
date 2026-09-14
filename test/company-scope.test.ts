@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
-import { validateCompanySelection, validateSyncScope } from '../src/security/company-scope.ts';
+import { validateCompanySelection, validateSyncScope, isTenantScopedRoute } from '../src/security/company-scope.ts';
+
+test('company registration and listing are tenant-scoped routes that need no company selection', () => {
+  assert.equal(isTenantScopedRoute('/api/companies', 'GET'), true);
+  assert.equal(isTenantScopedRoute('/api/companies', 'POST'), true);
+});
+
+test('data routes are NOT tenant-scoped and still require a company', () => {
+  assert.equal(isTenantScopedRoute('/api/customers', 'GET'), false);
+  assert.equal(isTenantScopedRoute('/api/invoices', 'POST'), false);
+  assert.equal(isTenantScopedRoute('/connector/jobs', 'GET'), false);
+});
 
 test('connector credential can select another company only inside its tenant', () => {
   assert.deepEqual(
