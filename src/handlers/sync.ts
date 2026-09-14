@@ -4,13 +4,20 @@
 
 import { Env } from '../index';
 import { jsonResponse } from '../utils/response';
+import { validateSyncScope } from '../security/company-scope';
 
-export async function handleSyncCustomers(request: Request, env: Env): Promise<Response> {
+export { validateSyncScope } from '../security/company-scope';
+
+export async function handleSyncCustomers(request: Request, tenantId: string, companyId: string, env: Env): Promise<Response> {
   try {
     const body = await request.json() as any;
-    const { TenantId, CompanyId, Customers } = body;
+    const { Customers } = body;
+    const scopeError = validateSyncScope(body, tenantId, companyId);
+    if (scopeError) return jsonResponse({ error: scopeError }, 403);
+    const TenantId = tenantId;
+    const CompanyId = companyId;
 
-    if (!TenantId || !CompanyId || !Array.isArray(Customers)) {
+    if (!Array.isArray(Customers)) {
       return jsonResponse({ error: 'Missing required fields' }, 400);
     }
 
@@ -103,12 +110,16 @@ export async function handleSyncCustomers(request: Request, env: Env): Promise<R
   }
 }
 
-export async function handleSyncInvoices(request: Request, env: Env): Promise<Response> {
+export async function handleSyncInvoices(request: Request, tenantId: string, companyId: string, env: Env): Promise<Response> {
   try {
     const body = await request.json() as any;
-    const { TenantId, CompanyId, Invoices } = body;
+    const { Invoices } = body;
+    const scopeError = validateSyncScope(body, tenantId, companyId);
+    if (scopeError) return jsonResponse({ error: scopeError }, 403);
+    const TenantId = tenantId;
+    const CompanyId = companyId;
 
-    if (!TenantId || !CompanyId || !Invoices) {
+    if (!Array.isArray(Invoices)) {
       return jsonResponse({ error: 'Missing required fields' }, 400);
     }
 
@@ -176,12 +187,16 @@ export async function handleSyncInvoices(request: Request, env: Env): Promise<Re
   }
 }
 
-export async function handleSyncProducts(request: Request, env: Env): Promise<Response> {
+export async function handleSyncProducts(request: Request, tenantId: string, companyId: string, env: Env): Promise<Response> {
   try {
     const body = await request.json() as any;
-    const { TenantId, CompanyId, Products } = body;
+    const { Products } = body;
+    const scopeError = validateSyncScope(body, tenantId, companyId);
+    if (scopeError) return jsonResponse({ error: scopeError }, 403);
+    const TenantId = tenantId;
+    const CompanyId = companyId;
 
-    if (!TenantId || !CompanyId || !Products) {
+    if (!Array.isArray(Products)) {
       return jsonResponse({ error: 'Missing required fields' }, 400);
     }
 

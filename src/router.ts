@@ -12,6 +12,7 @@ import { handleHealth } from './handlers/health';
 import { handleGetCustomers, handleGetCustomer, handleCreateCustomer } from './handlers/customers';
 import { handleGetInvoices, handleGetInvoice, handleCreateInvoice } from './handlers/invoices';
 import { handleGetProducts } from './handlers/products';
+import { handleGetCompanies, handleCreateCompany } from './handlers/companies';
 import { handleCreateQuote } from './handlers/quotes';
 import { handleSyncCustomers, handleSyncInvoices, handleSyncProducts } from './handlers/sync';
 import { handleGetJob } from './handlers/jobs';
@@ -35,10 +36,26 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   // All other routes require authentication
   const authResult = await authenticate(request, env);
   if (!authResult.authenticated) {
-    return jsonResponse({ error: 'Unauthorized', message: authResult.error }, 401);
+    return jsonResponse({ error: 'Unauthorized', message: authResult.error }, authResult.status || 401);
   }
 
-  const { tenantId, companyId } = authResult;
+  const { tenantId, companyId, principal } = authResult;
+
+  const connectorOnly = path.startsWith('/connector/') || path.startsWith('/sync/');
+  if (connectorOnly && principal !== 'connector') {
+    return jsonResponse({ error: 'Connector credential required' }, 403);
+  }
+  if (path.startsWith('/api/') && principal !== 'user') {
+    return jsonResponse({ error: 'User credential required' }, 403);
+  }
+
+  if (path === '/api/companies' && method === 'GET') {
+    return handleGetCompanies(tenantId!, env);
+  }
+
+  if (path === '/api/companies' && method === 'POST') {
+    return handleCreateCompany(request, tenantId!, env);
+  }
 
   // Mobile API routes (read-only for now)
   if (path === '/api/customers' && method === 'GET') {
@@ -77,15 +94,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   // Connector sync routes
   if (path === '/sync/customers' && method === 'POST') {
-    return handleSyncCustomers(request, env);
+    return handleSyncCustomers(request, tenantId!, companyId!, env);
   }
 
   if (path === '/sync/invoices' && method === 'POST') {
-    return handleSyncInvoices(request, env);
+    return handleSyncInvoices(request, tenantId!, companyId!, env);
   }
 
   if (path === '/sync/products' && method === 'POST') {
-    return handleSyncProducts(request, env);
+    return handleSyncProducts(request, tenantId!, companyId!, env);
   }
 
   // Frontend-facing job status API

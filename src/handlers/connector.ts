@@ -14,7 +14,7 @@ export async function handleGetConnectorJobs(
 ): Promise<Response> {
   try {
     const { results } = await env.DB.prepare(`
-      SELECT id, action, payload, request_id, attempts, created_at
+      SELECT id, company_id, action, payload, request_id, attempts, created_at
       FROM connector_jobs
       WHERE tenant_id = ? 
         AND company_id = ?
@@ -25,6 +25,7 @@ export async function handleGetConnectorJobs(
 
     const jobs = results.map((row: any) => ({
       jobId: row.id,
+      companyId: row.company_id,
       action: row.action,
       payload: JSON.parse(row.payload),
       requestId: row.request_id,
